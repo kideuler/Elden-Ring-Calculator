@@ -1,10 +1,12 @@
-/* Elden Ring Infusion Calculator: page logic. Needs window.ArEngine and the #weapon-db JSON. */
+/* Elden Ring Infusion Calculator: page logic. Needs window.ArEngine and the #weapon-db and #boss-db JSON. */
 (function () {
   "use strict";
 
   const E = window.ArEngine;
   const db = JSON.parse(document.getElementById("weapon-db").textContent);
   const model = E.createModel(db);
+  const bossDb = JSON.parse(document.getElementById("boss-db").textContent);
+  const bossById = new Map(bossDb.bosses.map((b) => [b.id, b]));
   const ATTRS = E.ATTRIBUTES;
   const DMG = E.DAMAGE_TYPES;
   const STATUS = E.STATUS_TYPES;
@@ -25,14 +27,33 @@
   const SPELL_LABEL = { magic: "Sorcery scaling", holy: "Incantation scaling" };
   const SPELL_SHORT = { magic: "Sorcery", holy: "Incant." };
   const RANGED_TYPES = new Set([50, 51, 53, 55, 56]);
+  const PHYS_LABEL = { standard: "Standard", slash: "Slash", strike: "Strike", pierce: "Pierce" };
+  const NEG_TYPES = ["standard", "slash", "strike", "pierce", "magic", "fire", "lightning", "holy"];
+  const NEG_LABEL = { ...PHYS_LABEL, magic: "Magic", fire: "Fire", lightning: "Lightning", holy: "Holy" };
+  const BOSS_STATUS = ["bleed", "frost", "poison", "rot", "sleep", "madness"];
+
+  // The physical damage type of each weapon class's basic attacks (most movesets mix types;
+  // people can override it in the fight settings)
+  const PHYSICAL_BY_CLASS = {};
+  const classTypes = {
+    slash: ["Dagger", "Throwing Blade", "Curved Sword", "Curved Greatsword", "Backhand Blade", "Katana", "Great Katana", "Twinblade", "Reaper", "Claw", "Beast Claw"],
+    pierce: ["Thrusting Sword", "Heavy Thrusting Sword", "Spear", "Great Spear", "Light Bow", "Bow", "Greatbow", "Crossbow", "Ballista", "Thrusting Shield"],
+    strike: ["Hammer", "Great Hammer", "Flail", "Colossal Weapon", "Fist", "Hand-to-Hand Art", "Torch", "Glintstone Staff", "Sacred Seal", "Dual Catalyst", "Small Shield", "Medium Shield", "Greatshield"],
+  };
+  for (const [type, classes] of Object.entries(classTypes)) for (const c of classes) PHYSICAL_BY_CLASS[c] = type;
+
   const STORAGE_KEY = "er-infusion-calculator:v1";
   const DEFAULT_STATE = {
     weapon: "Uchigatana",
     stats: { str: 18, dex: 40, int: 9, fai: 10, arc: 9 },
     level25: 25, // upgrade level on the regular +25 scale; somber weapons convert it to +10
     twoHanded: false,
-    sort: "ar",
+    sort: "ar", // "ar": best first (by AR, or by DPS when a boss is picked); "game": in-game order
     sample: true, // true while the stats are still the example ones
+    boss: "", // boss id, or "" to rank by attack rating
+    physical: "auto", // physical damage type of the hits: "auto" (by weapon class) or a type
+    pace: 2, // seconds per hit over the whole fight
+    motion: 100, // motion value of the attack, in percent
   };
 
   const $ = (id) => document.getElementById(id);
@@ -51,11 +72,22 @@
     verdict: $("verdict"),
     sortAr: $("sort-ar"),
     sortGame: $("sort-game"),
+    title: $("results-title"),
     caption: $("ledger-caption"),
     head: $("ledger-head"),
     body: $("ledger-body"),
     legendKeys: $("legend-keys"),
     legendExtra: $("legend-extra"),
+    legendBoss: $("legend-boss"),
+    boss: $("boss"),
+    bossHint: $("boss-hint"),
+    bossCard: $("boss-card"),
+    assume: $("assume"),
+    assumeSummary: $("assume-summary"),
+    physType: $("phys-type"),
+    physAuto: $("phys-auto"),
+    pace: $("pace"),
+    motion: $("motion"),
   };
   const statInputs = {};
   const statBoxes = {};
@@ -78,6 +110,24 @@
   };
   const plusLevel = (lvl) => (lvl > 0 ? ` +${lvl}` : "");
   const affinityName = (inf) => model.affinityNames.get(inf.affinity);
+  const fmt = (n) => Math.round(n).toLocaleString("en-US");
+  const pad2 = (n) => String(Math.floor(n)).padStart(2, "0");
+  const fmtSeconds = (s) => {
+    if (s < 59.95) return `${s.toFixed(1)} s`;
+    if (s < 3600) return `${Math.floor(s / 60)} min ${pad2(s % 60)} s`;
+    return `${Math.floor(s / 3600)} h ${pad2((s % 3600) / 60)} min`;
+  };
+  const fmtPace = (s) => `${Number(s.toFixed(2))} s`;
+  const fmtNeg = (n) => `${n < 0 ? "−" : ""}${Math.abs(Math.round(n * 100) / 100)}%`;
+  const listText = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+  const physicalFor = (w) => (state.physical !== "auto" ? state.physical : PHYSICAL_BY_CLASS[w.typeName] || "standard");
+  const killTime = (x) => (Number.isFinite(x.f.seconds) ? x.f.seconds : Number.MAX_VALUE);
+  const hitsText = (n) => `${fmt(n)} ${n === 1 ? "hit" : "hits"}`;
+  const killText = (f) =>
+    Number.isFinite(f.seconds) ? `${hitsText(f.hits)} · ${fmtSeconds(f.seconds)}` : "Can't kill";
+  const dpsText = (f) => (f.dps > 0 ? fmt(f.dps) : "–");
+  const procText = (n) => `${n} ${n === 1 ? "proc" : "procs"}`;
+  const percentMore = (a, b) => (a / b - 1) * 100;
 
   function loadState() {
     const s = JSON.parse(JSON.stringify(DEFAULT_STATE));
@@ -92,6 +142,10 @@
         s.twoHanded = saved.twoHanded === true;
         s.sort = saved.sort === "game" ? "game" : "ar";
         s.sample = saved.sample !== false;
+        if (typeof saved.boss === "string" && bossById.has(saved.boss)) s.boss = saved.boss;
+        if (saved.physical === "auto" || E.PHYSICAL_TYPES.includes(saved.physical)) s.physical = saved.physical;
+        if (Number(saved.pace) >= 0.5 && Number(saved.pace) <= 10) s.pace = Number(saved.pace);
+        if (Number(saved.motion) >= 10 && Number(saved.motion) <= 1000) s.motion = Number(saved.motion);
       }
     } catch (err) {
       /* storage unavailable: start from the defaults */
@@ -322,6 +376,44 @@
     });
   });
 
+  // ---- boss and fight settings ------------------------------------------------------------
+
+  for (const [label, dlc] of [["Base game", false], ["Shadow of the Erdtree", true]]) {
+    const group = document.createElement("optgroup");
+    group.label = label;
+    for (const b of bossDb.bosses) if (b.dlc === dlc) group.append(new Option(b.label, b.id));
+    els.boss.append(group);
+  }
+
+  els.boss.addEventListener("change", () => {
+    state.boss = els.boss.value;
+    saveState();
+    render();
+  });
+  els.physType.addEventListener("change", () => {
+    state.physical = els.physType.value;
+    saveState();
+    render();
+  });
+
+  function numberSetting(input, key, min, max) {
+    input.addEventListener("input", () => {
+      const value = Number(input.value);
+      if (input.value.trim() === "" || !Number.isFinite(value)) return;
+      state[key] = Math.max(min, Math.min(max, value));
+      saveState();
+      render();
+    });
+    input.addEventListener("blur", () => {
+      input.value = state[key];
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") input.blur();
+    });
+  }
+  numberSetting(els.pace, "pace", 0.5, 10);
+  numberSetting(els.motion, "motion", 10, 1000);
+
   function setSort(sort) {
     state.sort = sort;
     saveState();
@@ -344,15 +436,34 @@
 
   // ---- rendering ------------------------------------------------------------------------
 
+  // On wide screens the build panel is sticky; when it's taller than the window it sticks by its
+  // bottom edge instead, so the boss picker stays reachable (styles.css reads --build-h)
+  const buildPanel = document.querySelector(".build");
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => buildPanel.style.setProperty("--build-h", `${buildPanel.offsetHeight}px`)).observe(buildPanel);
+  }
+
   function render() {
     const level = levelFor(weapon);
     const calcOptions = { stats: state.stats, level, twoHanded: state.twoHanded };
     const results = weapon.infusions.map((inf) => ({ inf, r: E.calculate(model, weapon, inf, calcOptions) }));
-    const ranked = results.slice().sort((a, b) => b.r.total - a.r.total || results.indexOf(a) - results.indexOf(b));
+    const gameOrder = (a, b) => results.indexOf(a) - results.indexOf(b);
+    const boss = bossById.get(state.boss) || null;
+    let ranked;
+    if (boss) {
+      // Rank by time to kill (the same order as DPS), then by damage per hit
+      const fightOptions = { physicalType: physicalFor(weapon), motionValue: state.motion, secondsPerHit: state.pace };
+      for (const x of results) x.f = E.fightBoss(x.r, boss, fightOptions);
+      ranked = results.slice().sort((a, b) => killTime(a) - killTime(b) || b.f.hit.total - a.f.hit.total || gameOrder(a, b));
+    } else {
+      ranked = results.slice().sort((a, b) => b.r.total - a.r.total || gameOrder(a, b));
+    }
     renderBuild(level, results[0].r);
-    renderVerdict(results, ranked, level);
-    renderTable(state.sort === "ar" ? ranked : results, ranked[0], level);
-    renderLegend(results);
+    renderBoss(boss);
+    if (boss) renderFightVerdict(boss, results, ranked, level);
+    else renderVerdict(results, ranked, level);
+    renderTable(state.sort === "ar" ? ranked : results, ranked[0], level, boss);
+    renderLegend(results, boss);
   }
 
   function renderBuild(level, sample) {
@@ -407,6 +518,84 @@
         : `No ${ATTR_LONG[a]} requirement`;
     }
     els.sampleNote.hidden = !state.sample;
+  }
+
+  function renderBoss(boss) {
+    els.boss.value = state.boss;
+    els.physAuto.textContent = `Weapon default (${PHYS_LABEL[PHYSICAL_BY_CLASS[weapon.typeName] || "standard"]})`;
+    els.physType.value = state.physical;
+    if (document.activeElement !== els.pace) els.pace.value = state.pace;
+    if (document.activeElement !== els.motion) els.motion.value = state.motion;
+    els.bossHint.hidden = !!boss;
+    els.bossCard.hidden = !boss;
+    els.assume.hidden = !boss;
+    if (!boss) {
+      els.bossCard.innerHTML = "";
+      return;
+    }
+    const physical = physicalFor(weapon);
+    els.assumeSummary.textContent = `${PHYS_LABEL[physical]} hits · motion value ${state.motion} · a hit every ${fmtPace(state.pace)}`;
+    els.bossCard.innerHTML = bossCardHTML(boss, physical);
+  }
+
+  function bossCardHTML(boss, physical) {
+    const html = [];
+    const meta = [`<span>${esc(boss.location)}</span>`, `<span>${boss.dlc ? "Shadow of the Erdtree" : "Base game"}</span>`];
+    if (boss.wiki) meta.push(`<a href="${esc(boss.wiki)}" target="_blank" rel="noopener">Wiki page</a>`);
+    html.push(`<p class="weapon-meta">${meta.join("")}</p>`);
+
+    // Most bosses defend equally against every type; a few armored ones don't
+    const defense = DMG.map((t) => boss.defense[t]);
+    const defenseHTML = defense.every((d) => d === defense[0])
+      ? String(defense[0])
+      : DMG.map(
+          (t) =>
+            `<span class="key" title="${DMG_LABEL[t]} defense"><span class="swatch c-${t}${t === "holy" ? " holy" : ""}"></span>${boss.defense[t]}</span>`,
+        ).join(" ");
+    html.push(
+      `<dl class="boss-stats"><div><dt>HP</dt><dd>${fmt(boss.hp)}</dd></div><div><dt>Defense</dt><dd>${defenseHTML}</dd></div></dl>`,
+    );
+
+    const cells = NEG_TYPES.map((t) => {
+      const n = boss.negation[t];
+      const inUse = t === physical;
+      const classes = ["neg", `c-${E.PHYSICAL_TYPES.includes(t) ? "physical" : t}`];
+      if (n < 0) classes.push("weak");
+      else if (n >= 40) classes.push("resists");
+      if (inUse) classes.push("in-use");
+      const effect = n < 0 ? `takes ${-n}% extra` : n > 0 ? `${n}% is negated` : "no negation";
+      const title = `${NEG_LABEL[t]} damage: ${effect}${inUse ? ". Your physical hits are this type" : ""}`;
+      return (
+        `<div class="${classes.join(" ")}" title="${esc(title)}"><dt>${NEG_LABEL[t]}</dt>` +
+        `<dd>${fmtNeg(n)}${inUse ? '<span class="visually-hidden"> (your hits)</span>' : ""}</dd></div>`
+      );
+    });
+    html.push(`<p class="boss-sub">Damage negation</p><dl class="neg-grid">${cells.join("")}</dl>`);
+
+    // The whole resistance ladder, written like the wiki: buildup for the 1st proc / 2nd / ...
+    const rows = BOSS_STATUS.map((t) => {
+      const thresholds = boss.status[t];
+      const value = thresholds ? thresholds.map(fmt).join(" / ") : "Immune";
+      return `<div class="c-${t}${thresholds ? "" : " immune"}"><dt>${STATUS_LABEL[t]}</dt><dd>${value}</dd></div>`;
+    });
+    html.push(`<p class="boss-sub">Buildup needed, proc by proc</p><dl class="resist">${rows.join("")}</dl>`);
+
+    const notes = [];
+    const example = BOSS_STATUS.find((t) => boss.status[t] && boss.status[t].length > 1);
+    if (example) {
+      const [first, second] = boss.status[example];
+      notes.push(
+        `Resistance rises with every proc: the first ${STATUS_LABEL[example].toLowerCase()} proc takes ${fmt(first)} buildup, ` +
+          `the second ${fmt(second)}, and so on. After the last value, every proc needs that much.`,
+      );
+    } else if (BOSS_STATUS.some((t) => boss.status[t])) {
+      notes.push("This boss's resistance doesn't rise between procs.");
+    }
+    if (boss.status.bleed || boss.status.frost) {
+      notes.push(`Bleed and frost procs deal ${Math.round(boss.statusDamage * 100)}% of their usual damage to this boss.`);
+    }
+    html.push(`<p class="boss-note">${notes.join(" ")}</p>`);
+    return html.join("");
   }
 
   function barHTML(r, scaleTo) {
@@ -469,40 +658,135 @@
     }
     notes.push(weapon.paired ? "paired, no two-handed bonus" : r.twoHandBonus ? "two-handed" : "one-handed");
     html.push(`<p class="verdict-notes">${notes.join(" · ")}</p>`);
-
-    if (r.unmet.length) {
-      const parts = r.unmet.map((a) => `${ATTR_SHORT[a]} ${r.stats[a]} (needs ${weapon.requirements[a]})`);
-      let text = `Below the requirement: ${parts.join(", ")}. Damage that scales with a stat you don't meet loses its scaling and takes a 40% penalty.`;
-      if (r.unmet.includes("str") && !r.twoHandBonus && !weapon.paired) {
-        const twoHandStr = Math.floor(r.stats.str * 1.5);
-        if (twoHandStr >= weapon.requirements.str) text += ` Two-handing would count your STR as ${twoHandStr}, which is enough.`;
-      }
-      html.push(`<p class="warn">${text}</p>`);
-    }
+    html.push(unmetWarning(r));
     els.verdict.innerHTML = html.join("");
   }
 
-  function renderTable(rows, best, level) {
+  function unmetWarning(r) {
+    if (!r.unmet.length) return "";
+    const parts = r.unmet.map((a) => `${ATTR_SHORT[a]} ${r.stats[a]} (needs ${weapon.requirements[a]})`);
+    let text = `Below the requirement: ${parts.join(", ")}. Damage that scales with a stat you don't meet loses its scaling and takes a 40% penalty.`;
+    if (r.unmet.includes("str") && !r.twoHandBonus && !weapon.paired) {
+      const twoHandStr = Math.floor(r.stats.str * 1.5);
+      if (twoHandStr >= weapon.requirements.str) text += ` Two-handing would count your STR as ${twoHandStr}, which is enough.`;
+    }
+    return `<p class="warn">${text}</p>`;
+  }
+
+  /** Where a fight's damage came from: the hits, split by damage type, then each status. */
+  function damageParts(f) {
+    const parts = [];
+    for (const t of DMG) {
+      const p = f.hit.perType[t];
+      if (p && p.dealt > 0) parts.push({ key: t, amount: (f.sources.direct * p.dealt) / f.hit.total });
+    }
+    for (const t of E.DAMAGING_STATUS) if (f.sources[t] > 0) parts.push({ key: t, amount: f.sources[t] });
+    return { parts, total: parts.reduce((sum, p) => sum + p.amount, 0) };
+  }
+
+  function partsBar({ parts, total }, scale) {
+    if (!(total > 0)) return "";
+    return parts
+      .map((p) => {
+        const width = (p.amount / total) * scale * 100;
+        return `<span class="c-${p.key}${p.key === "holy" ? " holy" : ""}" style="width:${width.toFixed(2)}%"></span>`;
+      })
+      .join("");
+  }
+
+  function renderFightVerdict(boss, results, ranked, level) {
+    const best = ranked[0];
+    const { r, f } = best;
+    const html = [];
+    html.push(`<div class="verdict-label">${weapon.infusable ? "Best infusion against" : "Against"} ${esc(boss.name)}</div>`);
+    html.push(
+      `<div class="verdict-main"><p class="verdict-name">${esc(best.inf.name)}<span class="lvl">${plusLevel(level)}</span></p>` +
+        `<div class="verdict-ar"><span class="num">${dpsText(f)}</span><span class="unit">DPS</span></div></div>`,
+    );
+    const parts = damageParts(f);
+    if (parts.total > 0) html.push(`<div class="bar big" aria-hidden="true">${partsBar(parts, 1)}</div>`);
+
+    const keys = [];
+    for (const t of DMG) {
+      const p = f.hit.perType[t];
+      if (p && p.dealt > 0) {
+        keys.push(`<span class="key"><span class="swatch c-${t}${t === "holy" ? " holy" : ""}"></span>${DMG_LABEL[t]} ${fmt(p.dealt)} a hit</span>`);
+      }
+    }
+    for (const t of STATUS) {
+      const n = f.procs[t];
+      if (!n) continue;
+      const dealt = f.sources[t] > 0 ? `, ${fmt(f.sources[t])} damage` : "";
+      keys.push(`<span class="key"><span class="swatch c-${t}"></span>${STATUS_LABEL[t]} ${procText(n)}${dealt}</span>`);
+    }
+    if (keys.length) html.push(`<p class="verdict-split">${keys.join("")}</p>`);
+
+    const notes = [];
+    notes.push(
+      Number.isFinite(f.seconds)
+        ? `Kills in <strong>${hitsText(f.hits)}</strong>, ${fmtSeconds(f.seconds)}`
+        : `Can't kill ${esc(boss.name)}`,
+    );
+    if (weapon.infusable) {
+      const runnerUp = ranked[1];
+      const topAr = results.reduce((a, b) => (b.r.total > a.r.total ? b : a));
+      const arNote = topAr === runnerUp ? ", the highest AR" : "";
+      const name = `${esc(affinityName(runnerUp.inf))} (${dpsText(runnerUp.f)})${arNote}`;
+      if (runnerUp.f.dps > 0) {
+        const more = percentMore(f.dps, runnerUp.f.dps);
+        notes.push(more < 0.5 ? `Tied with <strong>${name}</strong>` : `<strong>+${Math.round(more)}%</strong> DPS over ${name}`);
+      }
+      const standard = results.find((x) => x.inf.affinity === 0);
+      if (standard && standard !== best && standard !== runnerUp && standard.f.dps > 0) {
+        notes.push(`<strong>+${Math.round(percentMore(f.dps, standard.f.dps))}%</strong> over Standard (${dpsText(standard.f)})`);
+      }
+      if (topAr !== best && topAr !== runnerUp) {
+        notes.push(`Highest AR: ${esc(affinityName(topAr.inf))} (${floor(topAr.r.total)} AR, ${dpsText(topAr.f)} DPS)`);
+      }
+    }
+    html.push(`<p class="verdict-notes">${notes.join(" · ")}</p>`);
+
+    const immune = [...new Set(results.flatMap((x) => x.f.immune))];
+    if (immune.length) {
+      const list = listText(immune.map((t) => STATUS_LABEL[t].toLowerCase()));
+      html.push(`<p class="verdict-notes">${esc(boss.name)} is immune to ${list}, so that buildup adds nothing here.</p>`);
+    }
+    html.push(unmetWarning(r));
+    els.verdict.innerHTML = html.join("");
+  }
+
+  function renderTable(rows, best, level, boss) {
     const all = weapon.infusions;
-    const dmgCols = DMG.filter((t) => rows.some((x) => x.r.damage[t]));
+    const dmgCols = boss ? [] : DMG.filter((t) => rows.some((x) => x.r.damage[t]));
     const statusCol = rows.some((x) => Object.keys(x.r.status).length);
     const scaleCols = ATTRS.filter((a) => rows.some((x) => x.r.scaling[a] > 0));
     const spellCols = spellTypes();
     const maxTotal = Math.max(1, ...rows.map((x) => x.r.total));
+    const maxDps = boss ? Math.max(1e-9, ...rows.map((x) => x.f.dps)) : 0;
     const bestTotal = floor(best.r.total);
-    const columnCount = 2 + dmgCols.length + spellCols.length + (statusCol ? 1 : 0) + scaleCols.length;
+    const columnCount = 2 + (boss ? 2 : dmgCols.length) + spellCols.length + (statusCol ? 1 : 0) + scaleCols.length;
+    const at = plusLevel(level) || " +0";
 
-    els.caption.textContent = `Attack rating of every ${weapon.name} infusion at${plusLevel(level) || " +0"}`;
+    els.title.textContent = boss ? `DPS against ${boss.name}` : "Attack rating by infusion";
+    els.caption.textContent = boss
+      ? `Damage per second of every ${weapon.name} infusion at${at} against ${boss.name}`
+      : `Attack rating of every ${weapon.name} infusion at${at}`;
 
     const head = [`<tr><th class="col-inf" scope="col">${weapon.infusable ? "Infusion" : "Weapon"}</th>`];
-    head.push(`<th class="col-ar" scope="col">Attack rating</th>`);
+    if (boss) {
+      head.push(`<th class="col-ar" scope="col" title="${esc(boss.name)}'s HP divided by the seconds to kill">DPS</th>`);
+      head.push(`<th class="wide" scope="col" title="Damage of one hit after ${esc(boss.name)}'s defense and negation">Per hit</th>`);
+      head.push(`<th class="wide" scope="col" title="Attack rating">AR</th>`);
+    } else {
+      head.push(`<th class="col-ar" scope="col">Attack rating</th>`);
+    }
     dmgCols.forEach((t) => {
       head.push(
         `<th class="wide" scope="col" title="${DMG_LABEL[t]} attack"><span class="key"><span class="swatch c-${t} ${t === "holy" ? "holy" : ""}"></span>${DMG_SHORT[t]}</span></th>`,
       );
     });
     spellCols.forEach((t) => head.push(`<th scope="col" title="${SPELL_LABEL[t]}">${SPELL_SHORT[t]}</th>`));
-    if (statusCol) head.push(`<th scope="col">Buildup</th>`);
+    if (statusCol) head.push(`<th scope="col">${boss ? "Procs" : "Buildup"}</th>`);
     scaleCols.forEach((a, i) => {
       head.push(
         `<th class="wide col-scale${i === 0 ? " col-group-start" : ""}" scope="col" title="${ATTR_LONG[a]} scaling at${plusLevel(level) || " +0"}">${ATTR_SHORT[a].charAt(0)}${ATTR_SHORT[a].slice(1).toLowerCase()}</th>`,
@@ -512,23 +796,35 @@
     els.head.innerHTML = head.join("");
 
     const body = [];
-    for (const { inf, r } of rows) {
+    for (const { inf, r, f } of rows) {
       const aff = inf.affinity;
       const isBest = weapon.infusable && inf === best.inf;
       const open = expanded.has(aff);
       const label = weapon.infusable ? affinityName(inf) : weapon.name;
       const total = floor(r.total);
-      const delta = total - bestTotal;
       body.push(`<tr class="row${isBest ? " best" : ""}" data-aff="${aff}">`);
       body.push(
         `<th class="col-inf" scope="row"><button type="button" class="inf-btn" aria-expanded="${open}" aria-controls="det-${aff + 1}" title="${esc(inf.name)}${plusLevel(level)}: show the damage breakdown">` +
           `<span class="chev" aria-hidden="true"></span>${esc(label)}</button>${isBest ? '<span class="tag tag-best">Best</span>' : ""}</th>`,
       );
-      body.push(
-        `<td class="col-ar"><div class="ar-line"><span class="ar-num">${total}</span>` +
-          `${weapon.infusable && delta < 0 ? `<span class="ar-delta">${delta.toString().replace("-", "−")}</span>` : ""}</div>` +
-          `<div class="bar" aria-hidden="true">${barHTML(r, maxTotal)}</div></td>`,
-      );
+      if (boss) {
+        const behind = best.f.dps > 0 ? (1 - f.dps / best.f.dps) * 100 : 0;
+        const delta = weapon.infusable && behind > 0 ? `<span class="ar-delta">−${behind < 1 ? "&lt;1" : Math.round(behind)}%</span>` : "";
+        body.push(
+          `<td class="col-ar"><div class="ar-line"><span class="ar-num">${dpsText(f)}</span>${delta}</div>` +
+            `<div class="bar" aria-hidden="true">${partsBar(damageParts(f), f.dps / maxDps)}</div>` +
+            `<div class="kill">${killText(f)}</div></td>`,
+        );
+        body.push(`<td class="wide">${fmt(f.hit.total)}</td>`);
+        body.push(`<td class="wide">${total}</td>`);
+      } else {
+        const delta = total - bestTotal;
+        body.push(
+          `<td class="col-ar"><div class="ar-line"><span class="ar-num">${total}</span>` +
+            `${weapon.infusable && delta < 0 ? `<span class="ar-delta">${delta.toString().replace("-", "−")}</span>` : ""}</div>` +
+            `<div class="bar" aria-hidden="true">${barHTML(r, maxTotal)}</div></td>`,
+        );
+      }
       dmgCols.forEach((t) => {
         const d = r.damage[t];
         if (!d) body.push(`<td class="wide"><span class="none">–</span></td>`);
@@ -541,10 +837,7 @@
         body.push(`<td><span class="${s.ineffective ? "ineffective" : ""}">${floor(s.value)}</span></td>`);
       });
       if (statusCol) {
-        const chips = STATUS.filter((t) => r.status[t]).map(
-          (t) =>
-            `<span class="chip c-${t}${r.status[t].ineffective ? " ineffective" : ""}" title="${STATUS_LABEL[t]} buildup">${STATUS_LABEL[t]} ${floor(r.status[t].total)}</span>`,
-        );
+        const chips = STATUS.filter((t) => r.status[t]).map((t) => statusChip(t, r, f, boss));
         body.push(`<td>${chips.length ? `<span class="chips">${chips.join("")}</span>` : '<span class="none">–</span>'}</td>`);
       }
       scaleCols.forEach((a, i) => {
@@ -555,17 +848,33 @@
       });
       body.push("</tr>");
       body.push(
-        `<tr class="details" id="det-${aff + 1}"${open ? "" : " hidden"}><td colspan="${columnCount}">${open ? breakdownHTML(inf, r, level) : ""}</td></tr>`,
+        `<tr class="details" id="det-${aff + 1}"${open ? "" : " hidden"}><td colspan="${columnCount}">${open ? breakdownHTML(inf, r, level, f, boss) : ""}</td></tr>`,
       );
     }
     els.body.innerHTML = body.join("");
 
+    els.sortAr.textContent = boss ? "Fastest kill" : "Highest AR";
     els.sortAr.setAttribute("aria-pressed", String(state.sort === "ar"));
     els.sortGame.setAttribute("aria-pressed", String(state.sort === "game"));
     els.sortAr.parentElement.hidden = all.length < 2;
   }
 
-  function breakdownHTML(inf, r, level) {
+  function statusChip(t, r, f, boss) {
+    const s = r.status[t];
+    const ineffective = s.ineffective ? " ineffective" : "";
+    const name = STATUS_LABEL[t];
+    if (!boss) return `<span class="chip c-${t}${ineffective}" title="${name} buildup">${name} ${floor(s.total)}</span>`;
+    if (!boss.status[t]) {
+      return `<span class="chip c-${t} immune" title="${esc(boss.name)} is immune to ${name.toLowerCase()}">${name} immune</span>`;
+    }
+    const n = f.procs[t] || 0;
+    const dealt = f.sources[t] > 0 ? `, ${fmt(f.sources[t])} damage` : "";
+    const when = n ? ` (on hit${n === 1 ? "" : "s"} ${listText(f.procHits[t].map(String))})` : "";
+    const title = `${name}: ${floor(s.total)} buildup a hit, ${procText(n)}${when} before the kill${dealt}`;
+    return `<span class="chip c-${t}${n ? "" : " zero"}${ineffective}" title="${esc(title)}">${name} ×${n}</span>`;
+  }
+
+  function breakdownHTML(inf, r, level, f, boss) {
     const attrs = ATTRS.filter((a) => r.scaling[a] > 0 || weapon.requirements[a]);
     const head = ["<tr><th scope=\"col\"></th><th scope=\"col\">Base</th>"];
     attrs.forEach((a) => {
@@ -619,11 +928,83 @@
     return (
       `<div class="details-inner"><p class="details-title">${esc(inf.name)}${plusLevel(level)}</p>` +
       `<div class="breakdown-wrap"><table class="breakdown"><thead>${head.join("")}</thead><tbody>${rows.join("")}</tbody></table></div>` +
-      `<p class="details-notes">${notes.join(" ")}</p></div>`
+      `<p class="details-notes">${notes.join(" ")}</p>${boss ? fightHTML(r, f, boss) : ""}</div>`
     );
   }
 
-  function renderLegend(results) {
+  /** The boss half of a breakdown: one hit type by type, then the status procs of the fight. */
+  function fightHTML(r, f, boss) {
+    const physical = physicalFor(weapon);
+    const percent = (v) => `${Math.round(v * 100)}%`;
+    const dash = '<span class="none">–</span>';
+    const hitRows = [];
+    for (const t of DMG) {
+      const p = f.hit.perType[t];
+      if (!p) continue;
+      const label = t === "physical" ? `Physical (${PHYS_LABEL[physical].toLowerCase()})` : DMG_LABEL[t];
+      hitRows.push(
+        `<tr><th scope="row">${label}</th><td>${floor(p.attack)}</td><td>${fmt(p.defense)}</td><td>${percent(p.defenseMultiplier)}</td>` +
+          `<td>${fmtNeg(p.negation * 100)}</td><td class="total">${fmt(p.dealt)}</td></tr>`,
+      );
+    }
+    if (hitRows.length > 1) {
+      hitRows.push(`<tr><th scope="row">One hit</th><td></td><td></td><td></td><td></td><td class="total">${fmt(f.hit.total)}</td></tr>`);
+    }
+    const html = [`<p class="details-sub">Against ${esc(boss.name)}</p>`];
+    html.push(
+      `<div class="breakdown-wrap"><table class="breakdown"><thead><tr><th scope="col"></th>` +
+        `<th scope="col" title="Attack rating × motion value">Attack</th><th scope="col">Defense</th>` +
+        `<th scope="col" title="Share of the attack left after defense">After defense</th><th scope="col">Negation</th>` +
+        `<th scope="col">Damage</th></tr></thead><tbody>${hitRows.join("")}</tbody></table></div>`,
+    );
+
+    const statusRows = STATUS.filter((t) => r.status[t]).map((t) => {
+      const thresholds = boss.status[t];
+      const cells = [`<th scope="row">${STATUS_LABEL[t]}</th><td>${floor(r.status[t].total)}</td>`];
+      if (!thresholds) cells.push(`<td>Immune</td><td>${dash}</td><td>${dash}</td><td>${dash}</td>`);
+      else {
+        const hits = f.procHits[t] || [];
+        const dealt = E.STATUS_EFFECTS[t] ? fmt(f.sources[t] || 0) : "not counted";
+        cells.push(
+          `<td>${thresholds.map(fmt).join(" / ")}</td><td>${hits.length}</td>` +
+            `<td class="hits">${hits.length ? hits.join(", ") : dash}</td><td class="total">${dealt}</td>`,
+        );
+      }
+      return `<tr>${cells.join("")}</tr>`;
+    });
+    if (statusRows.length) {
+      html.push(
+        `<div class="breakdown-wrap"><table class="breakdown"><thead><tr><th scope="col"></th><th scope="col">Buildup a hit</th>` +
+          `<th scope="col" title="Buildup for the 1st proc / 2nd / 3rd ...; procs after the last value need the last value">Needed per proc</th>` +
+          `<th scope="col">Procs</th><th scope="col" class="hits" title="The hit each proc landed on">On hits</th>` +
+          `<th scope="col">Damage</th></tr></thead><tbody>${statusRows.join("")}</tbody></table></div>`,
+      );
+    }
+
+    const notes = [];
+    if (Number.isFinite(f.seconds)) {
+      notes.push(
+        `Kills ${esc(boss.name)}'s ${fmt(boss.hp)} HP in ${hitsText(f.hits)} over ${fmtSeconds(f.seconds)} ` +
+          `at a hit every ${fmtPace(state.pace)}, so ${fmt(f.dps)} damage per second.`,
+      );
+      const { parts, total } = damageParts(f);
+      const fromStatus = parts.filter((p) => E.DAMAGING_STATUS.includes(p.key));
+      if (fromStatus.length) {
+        const shares = fromStatus.map((p) => `${STATUS_LABEL[p.key].toLowerCase()} ${percent(p.amount / total)}`);
+        notes.push(`Hits deal ${percent(f.sources.direct / total)} of the damage, ${listText(shares)}.`);
+      }
+    } else {
+      notes.push(`This build can't bring ${esc(boss.name)} down.`);
+    }
+    notes.push(
+      `Attack is attack rating × motion value ${state.motion}%. Defense lets 10–90% of an attack through, more as attack outgrows it; negation then removes its share.`,
+    );
+    if (f.procs.frost) notes.push("Each frost proc also makes the boss take 20% more damage for 30 seconds.");
+    html.push(`<p class="details-notes">${notes.join(" ")}</p>`);
+    return html.join("");
+  }
+
+  function renderLegend(results, boss) {
     const keys = [];
     DMG.forEach((t) => {
       if (results.some((x) => x.r.damage[t])) {
@@ -642,6 +1023,20 @@
     }
     els.legendExtra.textContent = extra.join(" ");
     els.legendExtra.hidden = !extra.length;
+
+    els.legendBoss.hidden = !boss;
+    if (!boss) return;
+    const physical = PHYS_LABEL[physicalFor(weapon)].toLowerCase();
+    const text = [
+      `DPS is ${boss.name}'s HP divided by the seconds it takes to kill: one ${physical} hit every ${fmtPace(state.pace)} at motion value ${state.motion}, with every proc along the way.`,
+      "Each damage type in a hit is cut by the boss's defense against it and then by its negation, which is why spreading damage across types or into a type the boss resists costs DPS.",
+      "Status buildup procs when it reaches the boss's resistance, which rises after every proc: bleed and frost deal a share of max HP at once, poison and scarlet rot tick for 90 seconds, and frostbite makes the boss take 20% more damage for 30 seconds. Sleep and madness procs aren't counted as damage.",
+      "A different pace changes every infusion alike, apart from the timed effects: poison and scarlet rot count for more at a slow pace, frostbite's bonus at a fast one.",
+    ];
+    if (weapon.sorcery || weapon.incantation) {
+      text.push("For staffs and seals this ranks hits with the tool itself; spell damage follows the spell scaling column instead.");
+    }
+    els.legendBoss.textContent = text.join(" ");
   }
 
   render();

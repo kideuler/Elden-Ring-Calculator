@@ -18,14 +18,17 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 const template = read("src/page.html");
 const db = JSON.parse(read("data/weapons.json"));
+const bossDb = JSON.parse(read("data/bosses.json"));
 const parts = {
   STYLES: read("src/styles.css"),
   ENGINE: read("src/engine.js"),
   APP: read("src/app.js"),
   // Inside <script type="application/json"> only "</script" could end the element early
   DATA: JSON.stringify(db).replace(/</g, "\\u003c"),
+  BOSSES: JSON.stringify(bossDb).replace(/</g, "\\u003c"),
   PATCH: db.meta.patch,
   WEAPON_COUNT: String(db.meta.weaponCount),
+  BOSS_COUNT: String(bossDb.meta.bossCount),
   // The upstream MIT notice travels with the embedded data, inside an HTML comment
   DATA_LICENSE: read("data/source/LICENSE-upstream.txt").trim(),
 };

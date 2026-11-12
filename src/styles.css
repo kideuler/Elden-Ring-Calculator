@@ -239,7 +239,8 @@ h1 {
 @media (min-width: 1181px) and (min-height: 780px) {
   .build {
     position: sticky;
-    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    /* app.js sets --build-h: a panel taller than the window sticks by its bottom edge instead */
+    top: min(calc(env(safe-area-inset-top, 0px) + 16px), calc(100vh - var(--build-h, 0px) - 16px));
   }
 }
 
@@ -577,6 +578,312 @@ input[type="range"]:disabled {
   color: var(--ink-2);
   background: var(--accent-wash);
   border-radius: 4px;
+}
+
+/* Boss picker */
+.select-wrap {
+  position: relative;
+  display: block;
+}
+
+.select-wrap select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 11px 38px 11px 12px;
+  font: 600 17px/1.3 var(--font-body);
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  -webkit-appearance: none;
+  appearance: none;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.select-wrap select:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--glow);
+}
+
+.select-wrap svg {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 14px;
+  height: 14px;
+  color: var(--ink-3);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.select-wrap.small select {
+  padding: 7px 30px 7px 9px;
+  font-size: 16px; /* 16px or more keeps iOS from zooming in on focus */
+}
+
+.select-wrap.small svg {
+  right: 10px;
+  width: 12px;
+  height: 12px;
+}
+
+.boss-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.boss-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 22px;
+  margin: 0;
+}
+
+.boss-stats > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.boss-stats dt,
+.boss-sub,
+.details-sub {
+  font: 700 11px/1.2 var(--font-body);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.boss-stats dd {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+  font: 700 17px/1.2 var(--font-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.boss-stats dd .key {
+  gap: 4px;
+  font-size: 14px;
+}
+
+.boss-sub {
+  margin: 2px 0 -4px;
+}
+
+.neg-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin: 0;
+}
+
+.neg {
+  min-width: 0;
+  padding: 4px 5px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--c);
+  border-radius: 3px;
+}
+
+.neg dt {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+}
+
+.neg.c-holy {
+  border-top-color: var(--holy-edge);
+}
+
+.neg dd {
+  margin: 0;
+  font: 700 15px/1.25 var(--font-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.neg.weak {
+  background: var(--accent-wash);
+  border-color: var(--accent-line);
+  border-top-color: var(--c);
+}
+
+.neg.weak dd {
+  color: var(--accent);
+}
+
+.neg.resists dd {
+  color: var(--ink-3);
+}
+
+.neg.in-use {
+  box-shadow: inset 0 -3px 0 var(--ink-2);
+}
+
+.neg.in-use dt {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.resist {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.resist > div {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+
+.resist dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.resist dt::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c);
+}
+
+.resist dd {
+  margin: 0;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.resist .immune dt,
+.resist .immune dd {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.resist .immune dt::before {
+  opacity: 0.4;
+}
+
+.boss-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink-3);
+}
+
+/* Fight settings */
+.assume {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.assume > summary {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 9px 12px 9px 28px;
+  font-size: 13px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.assume > summary::-webkit-details-marker {
+  display: none;
+}
+
+.assume > summary::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  top: 15px;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.assume[open] > summary {
+  border-bottom: 1px solid var(--line);
+}
+
+.assume[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.assume-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.assume-summary {
+  color: var(--ink-3);
+}
+
+.assume-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px 12px 0;
+}
+
+.assume-field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+.assume-field:first-child {
+  grid-column: 1 / -1;
+}
+
+.assume-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font: 600 16px/1.3 var(--font-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.assume-field input:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--glow);
+}
+
+.assume > .hint {
+  padding: 10px 12px 12px;
 }
 
 /* ---- Results ------------------------------------------------------------------------- */
@@ -942,6 +1249,26 @@ input[type="range"]:disabled {
   background: var(--c);
 }
 
+.chip.zero {
+  color: var(--ink-3);
+}
+
+.chip.immune {
+  color: var(--ink-3);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.chip.immune::before {
+  opacity: 0.4;
+}
+
+.kill {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 .ledger .col-scale {
   width: 30px;
   padding-inline: 5px;
@@ -1024,6 +1351,17 @@ input[type="range"]:disabled {
   max-width: 75ch;
 }
 
+.details-sub {
+  margin: 6px 0 0;
+}
+
+.breakdown .hits {
+  min-width: 14ch;
+  max-width: 32ch;
+  white-space: normal;
+  text-align: left;
+}
+
 /* Legend + footer */
 .legend {
   display: grid;
@@ -1103,7 +1441,8 @@ input[type="range"]:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .bar span,
-  .chev {
+  .chev,
+  .assume > summary::before {
     transition: none;
   }
 }

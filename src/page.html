@@ -12,7 +12,7 @@
   <header class="masthead">
     <p class="eyebrow">Elden Ring · Patch {{PATCH}} · Shadow of the Erdtree included</p>
     <h1>Infusion Calculator</h1>
-    <p class="lede">Pick a weapon and enter your stats to see its attack rating with every infusion, from Standard to Occult.</p>
+    <p class="lede">Pick a weapon and enter your stats to see its attack rating with every infusion, from Standard to Occult. Add a boss to find the infusion that kills it fastest.</p>
     <div class="rule" aria-hidden="true"></div>
   </header>
 
@@ -88,6 +88,45 @@
         </div>
         <p class="sample-note" id="sample-note" hidden>These are example stats. Type in your own and the table updates as you go.</p>
       </fieldset>
+
+      <div class="field field-boss">
+        <label class="label" for="boss">Boss</label>
+        <div class="select-wrap">
+          <select id="boss">
+            <option value="">None: rank by attack rating</option>
+          </select>
+          <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+        </div>
+        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it, counting its defenses, damage negation and status resistances.</p>
+        <div class="boss-card" id="boss-card" hidden></div>
+        <details class="assume" id="assume" hidden>
+          <summary><span class="assume-title">Fight settings</span> <span class="assume-summary" id="assume-summary"></span></summary>
+          <div class="assume-grid">
+            <label class="assume-field" for="phys-type">
+              <span>Physical hits</span>
+              <span class="select-wrap small">
+                <select id="phys-type">
+                  <option value="auto" id="phys-auto">Weapon default</option>
+                  <option value="standard">Standard</option>
+                  <option value="slash">Slash</option>
+                  <option value="strike">Strike</option>
+                  <option value="pierce">Pierce</option>
+                </select>
+                <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+              </span>
+            </label>
+            <label class="assume-field" for="pace">
+              <span>Seconds per hit</span>
+              <input id="pace" type="number" inputmode="decimal" min="0.5" max="10" step="0.5">
+            </label>
+            <label class="assume-field" for="motion">
+              <span>Motion value</span>
+              <input id="motion" type="number" inputmode="numeric" min="10" max="1000" step="5">
+            </label>
+          </div>
+          <p class="hint">Bosses resist the four physical types differently, and your weapon's moveset decides which you deal. Seconds per hit is your pace through the whole fight, dodging included; it sets how much poison, rot and frost add. Motion value is the attack's strength in percent: about 100 for a one-handed light attack, more for heavy and charged attacks.</p>
+        </details>
+      </div>
     </section>
 
     <section class="results" aria-labelledby="results-title">
@@ -113,12 +152,14 @@
         <div class="legend-keys" id="legend-keys"></div>
         <p>Select an infusion to see where its damage comes from. Numbers are rounded down, like the game's status screen. AR adds up every damage type, but enemies defend against each type separately, so split damage (physical plus an element) usually lands for a little less than its total suggests.</p>
         <p id="legend-extra" hidden></p>
+        <p id="legend-boss" hidden></p>
       </div>
     </section>
   </main>
 
   <footer class="footer">
     <p>Weapon data: Elden Ring patch {{PATCH}} game params (base damage, upgrade multipliers, stat curves, damage-type scaling and status effects) as extracted by Tom Clark's open-source <a href="https://github.com/ThomasJClark/elden-ring-weapon-calculator" target="_blank" rel="noopener">Elden Ring weapon calculator</a> (MIT license). Results are cross-checked against <a href="https://eldenring.tclark.io" target="_blank" rel="noopener">eldenring.tclark.io</a>.</p>
+    <p>Boss data: New Game HP, defense, damage negation and status resistance of {{BOSS_COUNT}} boss fights from the <a href="https://eldenring.wiki.fextralife.com/Bosses" target="_blank" rel="noopener">Elden Ring Wiki</a>, whose combat tables come from the game files through nex3's <a href="https://github.com/nex3/BossDataExtractor" target="_blank" rel="noopener">BossDataExtractor</a>. Status proc damage follows the wiki's Hemorrhage, Frostbite, Poison and Scarlet Rot pages.</p>
     <p>A fan-made tool, not affiliated with FromSoftware or Bandai Namco.</p>
   </footer>
 </div>
@@ -130,6 +171,7 @@ used under the MIT license:
 {{DATA_LICENSE}}
 -->
 <script id="weapon-db" type="application/json">{{DATA}}</script>
+<script id="boss-db" type="application/json">{{BOSSES}}</script>
 <script>
 {{ENGINE}}
 </script>

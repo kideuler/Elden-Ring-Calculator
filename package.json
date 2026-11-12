@@ -2,11 +2,12 @@
   "name": "elden-ring-infusion-calculator",
   "version": "1.0.0",
   "private": true,
-  "description": "Attack rating for every infusion of any Elden Ring weapon at your stats (patch 1.17, Shadow of the Erdtree included).",
+  "description": "Attack rating for every infusion of any Elden Ring weapon at your stats, and which infusion kills a chosen boss fastest (patch 1.17, Shadow of the Erdtree included).",
   "scripts": {
     "build:db": "node scripts/build-db.mjs",
+    "build:bosses": "node scripts/build-bosses.mjs",
     "build": "node scripts/build-page.mjs",
-    "test": "node --test tests/engine.test.mjs"
+    "test": "node --test tests/engine.test.mjs tests/boss.test.mjs"
   },
   "license": "MIT"
 }

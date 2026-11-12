@@ -22,8 +22,19 @@
  *   Frost, scarlet rot and death blight never scale.
  * - Sorcery / incantation scaling is the same multiplier applied to a base of 100.
  *
- * Results match the formula used by eldenring.tclark.io (MIT, Tom Clark); the test suite
- * checks this implementation against it for every weapon and infusion.
+ * Results match the formula used by eldenring.tclark.io (MIT, Tom Clark); they were checked
+ * against that site value by value, and the test suite pins down the formula's pieces.
+ *
+ * Against a boss (hitDamage and fightBoss below), each damage type of a hit is reduced
+ * separately:
+ *
+ *   attack  = AR(type) x motion value
+ *   dealt   = attack x defenseMultiplier(attack / boss defense) x (1 - boss negation)
+ *
+ * The defense multiplier climbs from 10% to 90% of attack as attack outgrows defense, which is
+ * why splitting the same AR across two damage types loses damage. fightBoss then plays out a
+ * fight one hit at a time at a fixed pace, adding status procs (bleed, frost, poison, rot) as
+ * the boss's resistance rises after each one, and reports hits and seconds to kill.
  */
 (function (root, factory) {
   const api = factory();
@@ -247,11 +258,202 @@
     return Math.round((level / Math.max(1, fromMax)) * toMax);
   }
 
+  // ---------------------------------------------------------------------------------------
+  // Damage against a boss
+
+  const PHYSICAL_TYPES = ["standard", "slash", "strike", "pierce"];
+
+  /**
+   * What a status does when its meter fills. Bleed and frost hit at once for a share of max HP
+   * plus a flat amount, scaled by the boss's statusDamage (bosses take 50-70% of the normal
+   * amount); poison and rot tick per second. Frost also makes the target take 20% more damage
+   * for 30 seconds, and none of frost, poison or rot can build up again while active.
+   */
+  const STATUS_EFFECTS = {
+    bleed: { hpShare: 0.15, flat: 100, bossScaled: true },
+    frost: { hpShare: 0.1, flat: 30, bossScaled: true, seconds: 30, damageTaken: 1.2 },
+    poison: { hpSharePerSecond: 0.0007, flatPerSecond: 7, seconds: 90 },
+    rot: { hpSharePerSecond: 0.0018, flatPerSecond: 15, seconds: 90 },
+  };
+  const DAMAGING_STATUS = ["bleed", "frost", "poison", "rot"];
+  const MAX_FIGHT_HITS = 20000;
+
+  /**
+   * Share of an attack that gets through defense, from the ratio of attack to defense:
+   * 10% at 1/8 of defense or less, 40% at equal values, 70% at 2.5x and 90% at 8x or more,
+   * joined by quadratic curves.
+   */
+  function defenseMultiplier(attack, defense) {
+    if (!(attack > 0)) return 0;
+    if (!(defense > 0)) return 0.9;
+    const r = attack / defense;
+    if (r >= 8) return 0.9;
+    if (r >= 2.5) return 0.9 - 0.2 * ((8 - r) / 5.5) ** 2;
+    if (r >= 1) return 0.7 - 0.3 * ((2.5 - r) / 1.5) ** 2;
+    if (r >= 0.125) return 0.1 + 0.3 * ((r - 0.125) / 0.875) ** 2;
+    return 0.1;
+  }
+
+  /**
+   * Damage one hit deals to a boss.
+   * @param result  the output of calculate()
+   * @param boss    an entry of the boss database
+   * @param options { motionValue = 100, physicalType = "standard" | "slash" | "strike" | "pierce" }
+   */
+  function hitDamage(result, boss, options = {}) {
+    const motion = (options.motionValue ?? 100) / 100;
+    const physicalType = PHYSICAL_TYPES.includes(options.physicalType) ? options.physicalType : "standard";
+    const perType = {};
+    let total = 0;
+    for (const type of DAMAGE_TYPES) {
+      const d = result.damage[type];
+      if (!d) continue;
+      const attack = d.total * motion;
+      const defense = boss.defense[type];
+      const negation = boss.negation[type === "physical" ? physicalType : type] / 100;
+      const multiplier = defenseMultiplier(attack, defense);
+      const dealt = attack * multiplier * (1 - negation);
+      perType[type] = { attack, defense, defenseMultiplier: multiplier, negation, dealt };
+      total += dealt;
+    }
+    return { perType, total };
+  }
+
+  /**
+   * Play out a fight: one hit every secondsPerHit seconds until the boss's HP runs out.
+   * Each hit deals hitDamage() and adds its status buildup; when a meter fills the status
+   * procs and the meter empties. Resistance rises with every proc: proc k needs
+   * boss.status[type][k - 1] (for example 293, then 335, 433, 723 and 1180), and every proc
+   * after the end of the list needs its last value.
+   *
+   * seconds counts only the part of the last swing that was needed, so dps is the fight's
+   * damage throughput: with no status effects it is exactly damage per hit / secondsPerHit,
+   * instead of jumping whenever the hit count changes.
+   *
+   * @param options hitDamage options plus { secondsPerHit = 2 }
+   * @returns { hit, hits, seconds, dps, sources: damage by source, procs: count per status,
+   *            procHits: the hit number of each proc per status, immune }
+   *          (hits and seconds are Infinity when the weapon can't kill the boss)
+   */
+  function fightBoss(result, boss, options = {}) {
+    const hit = hitDamage(result, boss, options);
+    const interval = Math.max(0.1, Number(options.secondsPerHit) || 2);
+    const hp = boss.hp;
+
+    const building = [];
+    const immune = [];
+    for (const type of STATUS_TYPES) {
+      const s = result.status[type];
+      if (!s || !(s.total > 0)) continue;
+      if (Array.isArray(boss.status[type])) building.push({ type, perHit: s.total });
+      else if (type !== "blight") immune.push(type);
+    }
+
+    const sources = { direct: 0, bleed: 0, frost: 0, poison: 0, rot: 0 };
+    const procs = {};
+    const procHits = {};
+    const meter = {};
+    const procCount = {};
+    const lockedUntil = {};
+    const dots = [];
+    let frostUntil = -Infinity;
+    let remaining = hp;
+    let seconds = Infinity;
+    let hits = Infinity;
+
+    const statusDamage = boss.statusDamage ?? 1;
+    const amplify = (t) => (t < frostUntil ? STATUS_EFFECTS.frost.damageTaken : 1);
+    const deal = (source, amount) => {
+      sources[source] += amount;
+      remaining -= amount;
+    };
+
+    for (let n = 1; n <= MAX_FIGHT_HITS; n++) {
+      const start = (n - 1) * interval;
+      const end = n * interval;
+
+      // Poison and rot tick between hits
+      let ticked = 0;
+      for (const dot of dots) {
+        const from = Math.max(start, dot.from);
+        const to = Math.min(end, dot.until);
+        if (to <= from) continue;
+        const amount = dot.perSecond * (to - from) * amplify(from);
+        if (amount >= remaining) {
+          // Dies partway through the gap
+          seconds = from + ((to - from) * remaining) / amount;
+          deal(dot.type, remaining);
+          hits = n - 1;
+          break;
+        }
+        deal(dot.type, amount);
+        ticked += amount;
+      }
+      if (remaining <= 0) break;
+
+      // The hit lands
+      const before = remaining;
+      const multiplier = amplify(end);
+      deal("direct", hit.total * multiplier);
+
+      for (const { type, perHit } of building) {
+        if ((lockedUntil[type] ?? -Infinity) > end) continue;
+        const thresholds = boss.status[type];
+        const k = procCount[type] ?? 0;
+        meter[type] = (meter[type] ?? 0) + perHit;
+        if (meter[type] < thresholds[Math.min(k, thresholds.length - 1)]) continue;
+
+        meter[type] = 0;
+        procCount[type] = k + 1;
+        procs[type] = k + 1;
+        (procHits[type] = procHits[type] || []).push(n);
+        const effect = STATUS_EFFECTS[type];
+        if (!effect) continue; // sleep and madness don't deal damage to bosses here
+        if (type === "bleed") {
+          deal("bleed", (effect.hpShare * hp + effect.flat) * statusDamage * multiplier);
+        } else if (type === "frost") {
+          deal("frost", (effect.hpShare * hp + effect.flat) * statusDamage);
+          frostUntil = end + effect.seconds;
+          lockedUntil.frost = frostUntil;
+        } else {
+          dots.push({
+            type,
+            perSecond: effect.hpSharePerSecond * hp + effect.flatPerSecond,
+            from: end,
+            until: end + effect.seconds,
+          });
+          lockedUntil[type] = end + effect.seconds;
+        }
+      }
+
+      if (remaining <= 0) {
+        seconds = start + (interval * before) / (before - remaining);
+        hits = n;
+        break;
+      }
+      if (hit.total <= 0 && building.length === 0 && ticked === 0 && dots.every((d) => d.until <= end)) break;
+    }
+
+    return {
+      hit,
+      hits,
+      seconds,
+      dps: Number.isFinite(seconds) && seconds > 0 ? hp / seconds : 0,
+      sources,
+      procs,
+      procHits,
+      immune,
+    };
+  }
+
   return {
     DAMAGE_TYPES,
     STATUS_TYPES,
     ATTRIBUTES,
     REQUIREMENT_PENALTY,
+    PHYSICAL_TYPES,
+    STATUS_EFFECTS,
+    DAMAGING_STATUS,
     evaluateCurve,
     createModel,
     effectiveStats,
@@ -260,5 +462,8 @@
     calculate,
     floor,
     convertLevel,
+    defenseMultiplier,
+    hitDamage,
+    fightBoss,
   };
 });
