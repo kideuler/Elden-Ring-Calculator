@@ -1,0 +1,12 @@
+{
+  "name": "elden-ring-infusion-calculator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Attack rating for every infusion of any Elden Ring weapon at your stats (patch 1.17, Shadow of the Erdtree included).",
+  "scripts": {
+    "build:db": "node scripts/build-db.mjs",
+    "build": "node scripts/build-page.mjs",
+    "test": "node --test tests/engine.test.mjs"
+  },
+  "license": "MIT"
+}

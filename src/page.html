@@ -1,0 +1,138 @@
+<title>Elden Ring Infusion Calculator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Attack rating for every infusion of any Elden Ring weapon at your stats. Patch 1.17, Shadow of the Erdtree included.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+{{STYLES}}
+</style>
+<!--BODY-->
+<div class="page">
+  <header class="masthead">
+    <p class="eyebrow">Elden Ring · Patch {{PATCH}} · Shadow of the Erdtree included</p>
+    <h1>Infusion Calculator</h1>
+    <p class="lede">Pick a weapon and enter your stats to see its attack rating with every infusion, from Standard to Occult.</p>
+    <div class="rule" aria-hidden="true"></div>
+  </header>
+
+  <main class="bench">
+    <section class="build panel" aria-labelledby="build-title">
+      <h2 id="build-title">Your build</h2>
+
+      <div class="field">
+        <label class="label" for="weapon-input">Weapon</label>
+        <div class="combo">
+          <input id="weapon-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+            aria-controls="weapon-list" autocomplete="off" autocapitalize="off" spellcheck="false"
+            placeholder="Search {{WEAPON_COUNT}} weapons">
+          <button class="combo-toggle" id="weapon-toggle" type="button" tabindex="-1" aria-label="Show weapon list">
+            <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </button>
+          <ul class="listbox" id="weapon-list" role="listbox" aria-label="Weapons" hidden></ul>
+        </div>
+        <p class="weapon-meta" id="weapon-meta"></p>
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <label class="label" for="level">Upgrade level</label>
+          <output class="level-out" id="level-out" for="level">+25</output>
+        </div>
+        <input id="level" type="range" min="0" max="25" step="1" value="25">
+        <p class="hint" id="level-hint"></p>
+      </div>
+
+      <fieldset class="field">
+        <legend class="label">Grip</legend>
+        <div class="seg" role="radiogroup" aria-label="Grip">
+          <input type="radio" name="grip" id="grip-1h" value="1h"><label for="grip-1h">One-handed</label>
+          <input type="radio" name="grip" id="grip-2h" value="2h"><label for="grip-2h">Two-handed</label>
+        </div>
+        <p class="hint" id="grip-hint"></p>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="label">Attributes</legend>
+        <div class="stat-grid">
+          <div class="stat" id="box-str">
+            <label for="stat-str" title="Strength">STR</label>
+            <input id="stat-str" type="number" inputmode="numeric" min="1" max="99" step="1">
+            <div class="steppers"><button type="button" data-attr="str" data-step="-1" aria-label="Lower Strength">−</button><button type="button" data-attr="str" data-step="1" aria-label="Raise Strength">+</button></div>
+            <span class="req" id="req-str"></span>
+          </div>
+          <div class="stat" id="box-dex">
+            <label for="stat-dex" title="Dexterity">DEX</label>
+            <input id="stat-dex" type="number" inputmode="numeric" min="1" max="99" step="1">
+            <div class="steppers"><button type="button" data-attr="dex" data-step="-1" aria-label="Lower Dexterity">−</button><button type="button" data-attr="dex" data-step="1" aria-label="Raise Dexterity">+</button></div>
+            <span class="req" id="req-dex"></span>
+          </div>
+          <div class="stat" id="box-int">
+            <label for="stat-int" title="Intelligence">INT</label>
+            <input id="stat-int" type="number" inputmode="numeric" min="1" max="99" step="1">
+            <div class="steppers"><button type="button" data-attr="int" data-step="-1" aria-label="Lower Intelligence">−</button><button type="button" data-attr="int" data-step="1" aria-label="Raise Intelligence">+</button></div>
+            <span class="req" id="req-int"></span>
+          </div>
+          <div class="stat" id="box-fai">
+            <label for="stat-fai" title="Faith">FAI</label>
+            <input id="stat-fai" type="number" inputmode="numeric" min="1" max="99" step="1">
+            <div class="steppers"><button type="button" data-attr="fai" data-step="-1" aria-label="Lower Faith">−</button><button type="button" data-attr="fai" data-step="1" aria-label="Raise Faith">+</button></div>
+            <span class="req" id="req-fai"></span>
+          </div>
+          <div class="stat" id="box-arc">
+            <label for="stat-arc" title="Arcane">ARC</label>
+            <input id="stat-arc" type="number" inputmode="numeric" min="1" max="99" step="1">
+            <div class="steppers"><button type="button" data-attr="arc" data-step="-1" aria-label="Lower Arcane">−</button><button type="button" data-attr="arc" data-step="1" aria-label="Raise Arcane">+</button></div>
+            <span class="req" id="req-arc"></span>
+          </div>
+        </div>
+        <p class="sample-note" id="sample-note" hidden>These are example stats. Type in your own and the table updates as you go.</p>
+      </fieldset>
+    </section>
+
+    <section class="results" aria-labelledby="results-title">
+      <div class="verdict panel" id="verdict" aria-live="polite"></div>
+
+      <div class="ledger-head">
+        <h2 id="results-title">Attack rating by infusion</h2>
+        <div class="sort" role="group" aria-label="Sort infusions">
+          <button type="button" id="sort-ar" aria-pressed="true">Highest AR</button>
+          <button type="button" id="sort-game" aria-pressed="false">Game order</button>
+        </div>
+      </div>
+
+      <div class="table-wrap panel">
+        <table class="ledger" id="ledger">
+          <caption class="visually-hidden" id="ledger-caption"></caption>
+          <thead id="ledger-head"></thead>
+          <tbody id="ledger-body"></tbody>
+        </table>
+      </div>
+
+      <div class="legend">
+        <div class="legend-keys" id="legend-keys"></div>
+        <p>Select an infusion to see where its damage comes from. Numbers are rounded down, like the game's status screen. AR adds up every damage type, but enemies defend against each type separately, so split damage (physical plus an element) usually lands for a little less than its total suggests.</p>
+        <p id="legend-extra" hidden></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Weapon data: Elden Ring patch {{PATCH}} game params (base damage, upgrade multipliers, stat curves, damage-type scaling and status effects) as extracted by Tom Clark's open-source <a href="https://github.com/ThomasJClark/elden-ring-weapon-calculator" target="_blank" rel="noopener">Elden Ring weapon calculator</a> (MIT license). Results are cross-checked against <a href="https://eldenring.tclark.io" target="_blank" rel="noopener">eldenring.tclark.io</a>.</p>
+    <p>A fan-made tool, not affiliated with FromSoftware or Bandai Namco.</p>
+  </footer>
+</div>
+
+<!--
+The weapon data below is derived from github.com/ThomasJClark/elden-ring-weapon-calculator,
+used under the MIT license:
+
+{{DATA_LICENSE}}
+-->
+<script id="weapon-db" type="application/json">{{DATA}}</script>
+<script>
+{{ENGINE}}
+</script>
+<script>
+{{APP}}
+</script>
