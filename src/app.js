@@ -97,6 +97,17 @@
     boss: $("boss"),
     bossHint: $("boss-hint"),
     bossCard: $("boss-card"),
+    finder: $("finder"),
+    finderTitle: $("finder-title"),
+    finderHint: $("finder-hint"),
+    finderRun: $("finder-run"),
+    finderProgress: $("finder-progress"),
+    finderBar: $("finder-bar"),
+    finderStatus: $("finder-status"),
+    finderStale: $("finder-stale"),
+    finderList: $("finder-list"),
+    finderNote: $("finder-note"),
+    finderLive: $("finder-live"),
   };
   const statInputs = {};
   const statBoxes = {};
@@ -571,6 +582,7 @@
     else renderVerdict(results, ranked, build);
     renderTable(state.sort === "ar" ? ranked : results, ranked[0], build, boss, fight);
     renderLegend(results, boss, fight);
+    renderFinder(boss);
   }
 
   function renderBuild(build, sample) {
@@ -1266,6 +1278,211 @@
     if (!boss) notes.push("Pick a boss to see which of these the weapon should use.");
     html.push(`<p class="details-notes">${notes.join(" ")}</p>`);
     return html.join("");
+  }
+
+  // ---- weapon search ---------------------------------------------------------------------------
+  // Fights every weapon against the boss, on request: it takes a few seconds, so it runs only
+  // when asked, in short slices that keep the page responsive, and its results stay until the
+  // next search (marked out of date when the attributes, talismans or upgrade level change).
+
+  const FINDER_TOP = 10;
+  const finder = {
+    run: null, // the search in progress: { bossId }
+    last: null, // the last finished search: { bossId, inputs, found }
+    drawn: null, // the search the list shows
+  };
+
+  /** What a search's results depend on, besides the boss */
+  const finderInputs = () => ({
+    attributes: STATS.map((a) => state.stats[a]).join(","),
+    talismans: state.talismans.filter(Boolean).sort().join("|"),
+    "upgrade level": String(state.level25),
+  });
+
+  let searchable = null;
+  /** The weapons a search fights (those with moveset data) and those it leaves out */
+  function searchableWeapons() {
+    if (!searchable) {
+      const fought = [];
+      const skipped = [];
+      for (const w of model.weapons) (E.weaponFamilies(w, movesetOf(w), typeOf(w)).generic ? skipped : fought).push(w);
+      searchable = { fought, skipped };
+    }
+    return searchable;
+  }
+
+  /** "glintstone staffs, sacred seals, …, Unarmed and Smithscript Dagger": classes left out whole, then single weapons */
+  function skippedText(skipped) {
+    const byClass = new Map();
+    for (const w of skipped) byClass.set(w.typeName, (byClass.get(w.typeName) || []).concat(w));
+    const parts = [];
+    const singles = [];
+    for (const [typeName, list] of byClass) {
+      const whole = model.weapons.filter((w) => w.typeName === typeName).length === list.length && list.length > 1;
+      if (!whole) singles.push(...list.map((w) => w.name));
+      else if (/ballista$/i.test(typeName)) parts.push(`${typeName.toLowerCase().slice(0, -1)}ae`);
+      else parts.push(`${typeName.toLowerCase()}s`);
+    }
+    return listText(parts.concat(singles));
+  }
+
+  const levelText = () => `+${state.level25}, somber +${E.convertLevel(state.level25, 25, 10)}`;
+
+  // A message the page posts to itself lets clicks and painting in before the next slice, as
+  // setTimeout(0) would, but without the timer's 4 ms floor or the once-a-second limit browsers
+  // put on timers in background tabs: a search keeps its pace when you look at another tab.
+  const sliceChannel = new MessageChannel();
+  const sliceWaiters = [];
+  sliceChannel.port1.onmessage = () => sliceWaiters.shift()();
+  const nextSlice = () =>
+    new Promise((resolve) => {
+      sliceWaiters.push(resolve);
+      sliceChannel.port2.postMessage(0);
+    });
+
+  async function startFinder() {
+    const boss = bossById.get(state.boss);
+    if (!boss) return;
+    const run = { bossId: boss.id };
+    finder.run = run;
+    finder.last = null;
+    const inputs = finderInputs();
+    const fights = fightsFor(boss);
+    const search = E.searchWeapons(
+      model,
+      model.weapons.map((w) => ({ weapon: w, level: levelFor(w), moveset: movesetOf(w), physicalType: typeOf(w) })),
+      { stats: { ...state.stats }, boss, tempo: tempoOf(boss), talismans: chosenTalismans(), fights, top: FINDER_TOP },
+    );
+    els.finderLive.textContent = `Searching every weapon against ${boss.name}.`;
+    showFinderProgress({ stage: "screen", done: 0, total: searchableWeapons().fought.length }, fights.count);
+    renderFinder(boss);
+
+    let step;
+    let slice = performance.now();
+    for (;;) {
+      step = search.next();
+      if (step.done) break;
+      if (performance.now() - slice > 30) {
+        showFinderProgress(step.value, fights.count);
+        await nextSlice();
+        if (finder.run !== run) return; // stopped, or the boss changed
+        slice = performance.now();
+      }
+    }
+    finder.run = null;
+    finder.last = { bossId: boss.id, inputs, found: step.value };
+    const first = step.value.results[0];
+    els.finderLive.textContent = first
+      ? `Done. Fastest against ${boss.name}: ${first.weapon.name}, ${fmtDps(first.best.sim.dps)} DPS.`
+      : `Done. No weapon can bring ${boss.name} down with this build.`;
+    renderFinder(bossById.get(state.boss) || null);
+  }
+
+  function showFinderProgress({ stage, done, total }, fightCount) {
+    // The two stages take about as long as each other
+    const share = stage === "screen" ? (0.5 * done) / total : 0.5 + (0.5 * done) / total;
+    els.finderBar.style.width = `${(share * 100).toFixed(1)}%`;
+    els.finderStatus.textContent =
+      stage === "screen"
+        ? `Fighting every weapon: ${done} of ${total}`
+        : `Fighting the ${total} closest over all ${fightCount} fights: ${done} of ${total}`;
+  }
+
+  els.finderRun.addEventListener("click", () => {
+    if (finder.run) {
+      finder.run = null;
+      els.finderLive.textContent = "Search stopped.";
+      renderFinder(bossById.get(state.boss) || null);
+    } else {
+      startFinder();
+    }
+  });
+
+  els.finderList.addEventListener("click", (e) => {
+    const row = e.target.closest(".finder-row");
+    if (row) choose(model.byName.get(row.dataset.weapon));
+  });
+
+  function renderFinder(boss) {
+    els.finder.hidden = !boss;
+    // A search belongs to its boss: picking another drops it
+    if (!boss || (finder.run && finder.run.bossId !== boss.id)) finder.run = null;
+    if (!boss || (finder.last && finder.last.bossId !== boss.id)) finder.last = null;
+    if (!boss) return;
+
+    const { fought } = searchableWeapons();
+    const running = !!finder.run;
+    const last = finder.last;
+    els.finderTitle.textContent = `Best weapons against ${boss.name}`;
+    els.finderHint.textContent =
+      `Fights all ${fought.length} weapons with moveset data in every infusion and grip, at your attributes, ` +
+      `talismans and upgrade level (${levelText()}), and lists the ${FINDER_TOP} that kill ${boss.name} fastest. Takes a few seconds.`;
+    els.finderRun.textContent = running ? "Stop" : last ? "Search again" : `Find the ${FINDER_TOP} best weapons`;
+    els.finderRun.classList.toggle("secondary", running);
+    els.finderProgress.hidden = !running;
+
+    els.finderList.hidden = !last;
+    els.finderNote.hidden = !last;
+    const now = finderInputs();
+    const changed = last ? Object.keys(now).filter((k) => now[k] !== last.inputs[k]) : [];
+    els.finder.classList.toggle("stale", changed.length > 0);
+    els.finderStale.hidden = !changed.length;
+    if (changed.length) {
+      const plural = changed.length > 1 || changed[0] !== "upgrade level";
+      els.finderStale.textContent = `Your ${listText(changed)} ${plural ? "have" : "has"} changed since this search. Search again to update the list.`;
+    }
+    if (!last) {
+      finder.drawn = null;
+      return;
+    }
+
+    // Draw the list once per search; after that only the weapon you have loaded moves, which
+    // keeps keyboard focus on the row you picked
+    if (finder.drawn !== last) {
+      finder.drawn = last;
+      const { results, skipped, screen, shortlist } = last.found;
+      const topDps = results.length ? results[0].best.sim.dps : 0;
+      els.finderList.innerHTML = results.length
+        ? results.map((r, i) => finderRowHTML(r, i, topDps)).join("")
+        : `<li class="hint">No weapon can bring ${esc(boss.name)} down with this build.</li>`;
+      els.finderNote.textContent =
+        `Select a weapon to load it. Each weapon was fought over the first ${screen} fights, then the ${shortlist} closest ` +
+        `over all ${fightsFor(boss).count}. Not searched, for want of moveset data: ${skippedText(skipped)}.`;
+    }
+    for (const row of els.finderList.querySelectorAll(".finder-row")) {
+      row.setAttribute("aria-current", String(row.dataset.weapon === weapon.name));
+    }
+  }
+
+  function finderRowHTML(r, i, topDps) {
+    const { weapon: w, best, fight } = r;
+    const sim = best.sim;
+    const how = [esc(w.typeName)];
+    if (w.infusable) how.push(esc(affinityName(best.infusion)));
+    how.push(w.paired ? "Paired" : GRIP_LABEL[best.grip]);
+    how.push(`kills in ${rangeClock(sim)}`);
+    const extra = [];
+    const greased = fight.rows
+      .filter((x) => x.grease && x.grease.sim.dps > sim.dps * 1.005)
+      .sort((a, b) => b.grease.sim.dps - a.grease.sim.dps)[0];
+    if (greased) {
+      extra.push(`<span class="finder-extra">With ${esc(greased.grease.name)}, ${esc(affinityName(greased.infusion))} reaches ${fmtDps(greased.grease.sim.dps)} DPS</span>`);
+    }
+    if (best.result.unmet.length) {
+      const needs = best.result.unmet.map((a) => `${w.requirements[a]} ${ATTR_SHORT[a]}`);
+      extra.push(`<span class="finder-extra unmet">Requirement not met: ${listText(needs)}</span>`);
+    }
+    const width = topDps > 0 ? Math.max(2, (sim.dps / topDps) * 100) : 0;
+    return (
+      `<li><button type="button" class="finder-row" data-weapon="${esc(w.name)}">` +
+      `<span class="finder-rank">${i + 1}</span>` +
+      iconHTML("weapons", w.name, "finder-icon") +
+      `<span class="finder-text"><span class="finder-name">${esc(w.name)}${w.dlc ? '<span class="badge">DLC</span>' : ""}</span>` +
+      `<span class="finder-how">${how.map((h) => `<span class="nowrap">${h}</span>`).join(" · ")}</span>${extra.join("")}</span>` +
+      `<span class="finder-dps"><span><span class="num">${fmtDps(sim.dps)}</span><span class="unit">DPS</span></span>` +
+      `<span class="bar" aria-hidden="true"><span style="--c: var(--accent); width: ${width.toFixed(1)}%"></span></span></span>` +
+      `</button></li>`
+    );
   }
 
   function renderLegend(results, boss, fight) {

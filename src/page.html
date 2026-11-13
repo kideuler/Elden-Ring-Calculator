@@ -22,7 +22,7 @@
   <header class="masthead">
     <p class="eyebrow">Elden Ring · Patch {{PATCH}} · Shadow of the Erdtree included</p>
     <h1>Infusion Calculator</h1>
-    <p class="lede">Pick a weapon, enter your attributes and talismans, and see its attack rating with every infusion. Add a boss to find the infusion that kills it fastest, and the grip and attacks to use.</p>
+    <p class="lede">Pick a weapon, enter your attributes and talismans, and see its attack rating with every infusion. Add a boss to find the infusion that kills it fastest and the grip and attacks to use, or search every weapon for the ten that kill it fastest.</p>
     <div class="rule" aria-hidden="true"></div>
   </header>
 
@@ -134,12 +134,30 @@
           </select>
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         </div>
-        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it. The calculator works out the grip and the attacks, from the boss's defenses, resistances and how much room it leaves to attack.</p>
+        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it, and to search every weapon for the fastest. The calculator works out the grip and the attacks, from the boss's defenses, resistances and how much room it leaves to attack.</p>
         <div class="boss-card" id="boss-card" hidden></div>
       </div>
     </section>
 
     <section class="results" aria-labelledby="results-title">
+      <section class="finder panel" id="finder" aria-labelledby="finder-title" hidden>
+        <div class="finder-head">
+          <div class="finder-intro">
+            <h2 id="finder-title">Best weapons</h2>
+            <p class="hint" id="finder-hint"></p>
+          </div>
+          <button type="button" class="action" id="finder-run"></button>
+        </div>
+        <div class="finder-progress" id="finder-progress" hidden>
+          <div class="progress" aria-hidden="true"><span id="finder-bar"></span></div>
+          <p class="hint" id="finder-status"></p>
+        </div>
+        <p class="finder-stale" id="finder-stale" hidden></p>
+        <ol class="finder-list" id="finder-list" hidden></ol>
+        <p class="hint" id="finder-note" hidden></p>
+        <p class="visually-hidden" id="finder-live" aria-live="polite"></p>
+      </section>
+
       <div class="verdict panel" id="verdict" aria-live="polite"></div>
 
       <div class="ledger-head">

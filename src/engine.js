@@ -1078,6 +1078,37 @@
   }
 
   /**
+   * The attack families a weapon fights with in each grip it can be held in (paired weapons have
+   * no two-handed stance; bows are always held in two hands). A weapon without moveset data gets
+   * one basic hit a second in each grip, and `generic` is true.
+   */
+  function weaponFamilies(weapon, moveset, physicalType) {
+    const grips = weapon.paired ? ["1h"] : getsTwoHandBonus(weapon, false) ? ["2h"] : ["1h", "2h"];
+    const families = {};
+    for (const grip of grips) {
+      const list = moveset ? attackFamilies(moveset[grip]) : [];
+      if (list.length) families[grip] = list;
+    }
+    const generic = Object.keys(families).length === 0;
+    if (generic) for (const grip of grips) families[grip] = basicFamily(physicalType);
+    return { families, generic };
+  }
+
+  /**
+   * The infusion that kills fastest among rankInfusions rows, as the page ranks them: kill time,
+   * then attack rating, then the weapon's own order.
+   */
+  function fastestRow(rows) {
+    let best = rows[0];
+    for (const row of rows) {
+      const a = row.sim.seconds;
+      const b = best.sim.seconds;
+      if (a < b || (a === b && row.result.total > best.result.total)) best = row;
+    }
+    return best;
+  }
+
+  /**
    * Every infusion of a weapon against a boss, each in the grip that kills faster.
    *
    * @param options {
@@ -1097,24 +1128,27 @@
    *                     grease: { name, type, attack, sim } or null }] in the weapon's order }
    */
   function rankInfusions(model, weapon, options) {
+    const steps = rankInfusionsInSteps(model, weapon, options);
+    let step;
+    while (!(step = steps.next()).done);
+    return step.value;
+  }
+
+  /**
+   * rankInfusions in steps, for a caller that spreads the work out: a generator that yields
+   * between one infusion and the next and returns what rankInfusions returns.
+   */
+  function* rankInfusionsInSteps(model, weapon, options) {
     const { boss, tempo } = options;
     const effects = talismanEffects(options.talismans);
     const stats = boostedStats(options.stats, effects);
     const stamina = staminaFor(stats.end, effects.stamina);
     const fights = options.fights || createFights(tempo, { count: options.count, seed: options.seed });
+    const { families, generic } = weaponFamilies(weapon, options.moveset, options.physicalType);
 
-    // Paired weapons have no two-handed stance; bows are always held in two hands
-    const grips = weapon.paired ? ["1h"] : getsTwoHandBonus(weapon, false) ? ["2h"] : ["1h", "2h"];
-    const families = {};
-    const moveset = options.moveset || null;
-    for (const grip of grips) {
-      const list = moveset ? attackFamilies(moveset[grip]) : [];
-      if (list.length) families[grip] = list;
-    }
-    const generic = Object.keys(families).length === 0;
-    if (generic) for (const grip of grips) families[grip] = basicFamily(options.physicalType);
-
-    const rows = weapon.infusions.map((infusion) => {
+    const rows = [];
+    for (const infusion of weapon.infusions) {
+      if (rows.length) yield rows.length;
       const row = { infusion, grips: {}, grip: null, result: null, sim: null, fastest: 0, grease: null };
       for (const grip of Object.keys(families)) {
         const result = calculate(model, weapon, infusion, { stats, level: options.level, twoHanded: grip === "2h" });
@@ -1140,8 +1174,8 @@
         });
         row.grease = { ...grease, sim: simulate(fighter, fights) };
       }
-      return row;
-    });
+      rows.push(row);
+    }
 
     // In how many fights is each infusion the first to kill?
     for (let f = 0; f < fights.count; f++) {
@@ -1153,6 +1187,89 @@
     }
 
     return { effects, stats, stamina, fights, generic, grips: Object.keys(families), families, rows };
+  }
+
+  /**
+   * The weapons that kill a boss fastest, each in its best infusion and grip.
+   *
+   * Fighting every infusion of every weapon over all the fights takes tens of seconds, so the
+   * search goes in two stages over the same fights. First each weapon is fought over the first
+   * few of them (`screen`, default 24) without greases, which is enough to tell the contenders
+   * from the rest. Then the closest (`shortlist`, default 30) are fought over all of them exactly
+   * as rankInfusions fights one weapon, and the fastest `top` (default 10) are returned.
+   * Weapons without moveset data (staffs, seals, bows and the like) are left out: their one
+   * basic hit a second is a stand-in, not a moveset that can be compared.
+   *
+   * A generator, so a page can spread the work over several frames: it yields { stage, done,
+   * total } after each weapon of the screen (stage "screen"), then in the final stage (stage
+   * "final") between one infusion and the next as well, since a weapon fought over every fight
+   * can take half a second against a boss with a lot of HP. `done` counts finished weapons.
+   *
+   * @param candidates [{ weapon, level, moveset, physicalType }], as rankInfusions takes them
+   * @param options    { stats, boss, tempo, talismans, fights (the full set), screen, shortlist, top }
+   * @returns { searched: how many weapons were fought, skipped: the weapons without moveset data,
+   *            screen: the fights every weapon met, shortlist: how many were fought over all of them,
+   *            results: [{ weapon, level, fight: rankInfusions output, best: its fastest row }],
+   *            fastest first, only weapons that can kill the boss }
+   */
+  function* searchWeapons(model, candidates, options) {
+    const { stats, boss, tempo, talismans } = options;
+    const fights = options.fights || createFights(tempo);
+    // The first fights of the full set: every fight's cycles come from its own stream, so these
+    // are the very fights the shortlist meets again
+    const screen = { ...fights, count: Math.min(fights.count, Math.max(1, Math.floor(options.screen ?? 24))) };
+    const shortlistSize = Math.max(1, Math.floor(options.shortlist ?? 30));
+    const top = Math.max(1, Math.floor(options.top ?? 10));
+    const fight = (c, set, greases) =>
+      rankInfusionsInSteps(model, c.weapon, {
+        stats,
+        level: c.level,
+        boss,
+        tempo,
+        moveset: c.moveset,
+        physicalType: c.physicalType,
+        talismans,
+        fights: set,
+        greases,
+      });
+
+    const usable = [];
+    const skipped = [];
+    for (const c of candidates) (weaponFamilies(c.weapon, c.moveset, c.physicalType).generic ? skipped : usable).push(c);
+
+    const estimates = [];
+    for (let i = 0; i < usable.length; i++) {
+      const steps = fight(usable[i], screen, false);
+      let step;
+      while (!(step = steps.next()).done);
+      const best = fastestRow(step.value.rows);
+      if (Number.isFinite(best.sim.seconds)) estimates.push({ c: usable[i], seconds: best.sim.seconds, ar: best.result.total, i });
+      yield { stage: "screen", done: i + 1, total: usable.length };
+    }
+    estimates.sort((a, b) => a.seconds - b.seconds || b.ar - a.ar || a.i - b.i);
+    const shortlist = estimates.slice(0, shortlistSize);
+
+    const results = [];
+    for (let i = 0; i < shortlist.length; i++) {
+      const { c } = shortlist[i];
+      const steps = fight(c, fights, true);
+      let step;
+      while (!(step = steps.next()).done) yield { stage: "final", done: i, total: shortlist.length };
+      const full = step.value;
+      results.push({ weapon: c.weapon, level: c.level, fight: full, best: fastestRow(full.rows), i });
+      yield { stage: "final", done: i + 1, total: shortlist.length };
+    }
+    results.sort((a, b) => a.best.sim.seconds - b.best.sim.seconds || b.best.result.total - a.best.result.total || a.i - b.i);
+    return {
+      searched: usable.length,
+      skipped: skipped.map((c) => c.weapon),
+      screen: screen.count,
+      shortlist: shortlist.length,
+      results: results
+        .filter((r) => Number.isFinite(r.best.sim.seconds))
+        .slice(0, top)
+        .map(({ i, ...r }) => r),
+    };
   }
 
   return {
@@ -1190,6 +1307,10 @@
     createFights,
     prepareFighter,
     simulate,
+    weaponFamilies,
+    fastestRow,
     rankInfusions,
+    rankInfusionsInSteps,
+    searchWeapons,
   };
 });

@@ -862,6 +862,193 @@ input[type="range"]:disabled {
   min-width: 0;
 }
 
+/* Weapon search: a button, then the ten weapons that kill the boss fastest */
+.finder {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.finder-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.finder-intro {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+.finder-intro .hint {
+  max-width: 64ch;
+}
+
+.action {
+  flex: none;
+  padding: 10px 16px;
+  font: 700 14px/1.2 var(--font-body);
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.action:hover {
+  filter: brightness(1.08);
+}
+
+.action:focus-visible,
+.finder-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--glow), 0 0 0 1px var(--accent);
+}
+
+.action.secondary {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+
+.finder-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.progress {
+  height: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+  border-radius: 3px;
+}
+
+.progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.finder-stale {
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--accent-wash);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.finder-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity 0.15s ease;
+}
+
+.finder.stale .finder-list {
+  opacity: 0.55;
+}
+
+.finder-row {
+  display: grid;
+  grid-template-columns: 20px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px 7px 6px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.finder-row:hover {
+  background: var(--panel-2);
+}
+
+.finder-row[aria-current="true"] {
+  background: var(--accent-wash);
+}
+
+.finder-rank {
+  font: 600 15px/1 var(--font-display);
+  text-align: right;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.finder-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.finder-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.finder-name {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.finder-how,
+.finder-extra {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+
+.finder-how .nowrap {
+  white-space: nowrap;
+}
+
+.finder-extra {
+  color: var(--ink-3);
+}
+
+.finder-extra.unmet {
+  color: var(--danger);
+}
+
+.finder-dps {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  min-width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.finder-dps .num {
+  font: 700 20px/1 var(--font-body);
+}
+
+.finder-dps .unit {
+  margin-left: 4px;
+  font: 700 11px/1 var(--font-body);
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+
+.finder-dps .bar {
+  width: 64px;
+  height: 4px;
+}
+
 .verdict {
   position: relative;
   overflow: hidden;
@@ -1449,12 +1636,43 @@ input[type="range"]:disabled {
   .verdict {
     padding: 16px;
   }
+
+  .finder {
+    padding: 16px;
+  }
+
+  .finder-row {
+    grid-template-columns: 16px 36px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding-right: 4px;
+  }
+
+  /* The number alone, over its unit: the text gets the room */
+  .finder-dps {
+    min-width: 0;
+  }
+
+  .finder-dps .unit {
+    display: block;
+    margin: 4px 0 0;
+    text-align: right;
+  }
+
+  .finder-dps .bar {
+    display: none;
+  }
+
+  .finder-head .action {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bar span,
   .chev,
-  .combo-icon {
+  .combo-icon,
+  .progress span,
+  .finder-list {
     transition: none;
   }
 }
@@ -1474,7 +1692,7 @@ input[type="range"]:disabled {
   <header class="masthead">
     <p class="eyebrow">Elden Ring · Patch 1.17 · Shadow of the Erdtree included</p>
     <h1>Infusion Calculator</h1>
-    <p class="lede">Pick a weapon, enter your attributes and talismans, and see its attack rating with every infusion. Add a boss to find the infusion that kills it fastest, and the grip and attacks to use.</p>
+    <p class="lede">Pick a weapon, enter your attributes and talismans, and see its attack rating with every infusion. Add a boss to find the infusion that kills it fastest and the grip and attacks to use, or search every weapon for the ten that kill it fastest.</p>
     <div class="rule" aria-hidden="true"></div>
   </header>
 
@@ -1586,12 +1804,30 @@ input[type="range"]:disabled {
           </select>
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         </div>
-        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it. The calculator works out the grip and the attacks, from the boss's defenses, resistances and how much room it leaves to attack.</p>
+        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it, and to search every weapon for the fastest. The calculator works out the grip and the attacks, from the boss's defenses, resistances and how much room it leaves to attack.</p>
         <div class="boss-card" id="boss-card" hidden></div>
       </div>
     </section>
 
     <section class="results" aria-labelledby="results-title">
+      <section class="finder panel" id="finder" aria-labelledby="finder-title" hidden>
+        <div class="finder-head">
+          <div class="finder-intro">
+            <h2 id="finder-title">Best weapons</h2>
+            <p class="hint" id="finder-hint"></p>
+          </div>
+          <button type="button" class="action" id="finder-run"></button>
+        </div>
+        <div class="finder-progress" id="finder-progress" hidden>
+          <div class="progress" aria-hidden="true"><span id="finder-bar"></span></div>
+          <p class="hint" id="finder-status"></p>
+        </div>
+        <p class="finder-stale" id="finder-stale" hidden></p>
+        <ol class="finder-list" id="finder-list" hidden></ol>
+        <p class="hint" id="finder-note" hidden></p>
+        <p class="visually-hidden" id="finder-live" aria-live="polite"></p>
+      </section>
+
       <div class="verdict panel" id="verdict" aria-live="polite"></div>
 
       <div class="ledger-head">
@@ -2739,6 +2975,37 @@ SOFTWARE.
   }
 
   /**
+   * The attack families a weapon fights with in each grip it can be held in (paired weapons have
+   * no two-handed stance; bows are always held in two hands). A weapon without moveset data gets
+   * one basic hit a second in each grip, and `generic` is true.
+   */
+  function weaponFamilies(weapon, moveset, physicalType) {
+    const grips = weapon.paired ? ["1h"] : getsTwoHandBonus(weapon, false) ? ["2h"] : ["1h", "2h"];
+    const families = {};
+    for (const grip of grips) {
+      const list = moveset ? attackFamilies(moveset[grip]) : [];
+      if (list.length) families[grip] = list;
+    }
+    const generic = Object.keys(families).length === 0;
+    if (generic) for (const grip of grips) families[grip] = basicFamily(physicalType);
+    return { families, generic };
+  }
+
+  /**
+   * The infusion that kills fastest among rankInfusions rows, as the page ranks them: kill time,
+   * then attack rating, then the weapon's own order.
+   */
+  function fastestRow(rows) {
+    let best = rows[0];
+    for (const row of rows) {
+      const a = row.sim.seconds;
+      const b = best.sim.seconds;
+      if (a < b || (a === b && row.result.total > best.result.total)) best = row;
+    }
+    return best;
+  }
+
+  /**
    * Every infusion of a weapon against a boss, each in the grip that kills faster.
    *
    * @param options {
@@ -2758,24 +3025,27 @@ SOFTWARE.
    *                     grease: { name, type, attack, sim } or null }] in the weapon's order }
    */
   function rankInfusions(model, weapon, options) {
+    const steps = rankInfusionsInSteps(model, weapon, options);
+    let step;
+    while (!(step = steps.next()).done);
+    return step.value;
+  }
+
+  /**
+   * rankInfusions in steps, for a caller that spreads the work out: a generator that yields
+   * between one infusion and the next and returns what rankInfusions returns.
+   */
+  function* rankInfusionsInSteps(model, weapon, options) {
     const { boss, tempo } = options;
     const effects = talismanEffects(options.talismans);
     const stats = boostedStats(options.stats, effects);
     const stamina = staminaFor(stats.end, effects.stamina);
     const fights = options.fights || createFights(tempo, { count: options.count, seed: options.seed });
+    const { families, generic } = weaponFamilies(weapon, options.moveset, options.physicalType);
 
-    // Paired weapons have no two-handed stance; bows are always held in two hands
-    const grips = weapon.paired ? ["1h"] : getsTwoHandBonus(weapon, false) ? ["2h"] : ["1h", "2h"];
-    const families = {};
-    const moveset = options.moveset || null;
-    for (const grip of grips) {
-      const list = moveset ? attackFamilies(moveset[grip]) : [];
-      if (list.length) families[grip] = list;
-    }
-    const generic = Object.keys(families).length === 0;
-    if (generic) for (const grip of grips) families[grip] = basicFamily(options.physicalType);
-
-    const rows = weapon.infusions.map((infusion) => {
+    const rows = [];
+    for (const infusion of weapon.infusions) {
+      if (rows.length) yield rows.length;
       const row = { infusion, grips: {}, grip: null, result: null, sim: null, fastest: 0, grease: null };
       for (const grip of Object.keys(families)) {
         const result = calculate(model, weapon, infusion, { stats, level: options.level, twoHanded: grip === "2h" });
@@ -2801,8 +3071,8 @@ SOFTWARE.
         });
         row.grease = { ...grease, sim: simulate(fighter, fights) };
       }
-      return row;
-    });
+      rows.push(row);
+    }
 
     // In how many fights is each infusion the first to kill?
     for (let f = 0; f < fights.count; f++) {
@@ -2814,6 +3084,89 @@ SOFTWARE.
     }
 
     return { effects, stats, stamina, fights, generic, grips: Object.keys(families), families, rows };
+  }
+
+  /**
+   * The weapons that kill a boss fastest, each in its best infusion and grip.
+   *
+   * Fighting every infusion of every weapon over all the fights takes tens of seconds, so the
+   * search goes in two stages over the same fights. First each weapon is fought over the first
+   * few of them (`screen`, default 24) without greases, which is enough to tell the contenders
+   * from the rest. Then the closest (`shortlist`, default 30) are fought over all of them exactly
+   * as rankInfusions fights one weapon, and the fastest `top` (default 10) are returned.
+   * Weapons without moveset data (staffs, seals, bows and the like) are left out: their one
+   * basic hit a second is a stand-in, not a moveset that can be compared.
+   *
+   * A generator, so a page can spread the work over several frames: it yields { stage, done,
+   * total } after each weapon of the screen (stage "screen"), then in the final stage (stage
+   * "final") between one infusion and the next as well, since a weapon fought over every fight
+   * can take half a second against a boss with a lot of HP. `done` counts finished weapons.
+   *
+   * @param candidates [{ weapon, level, moveset, physicalType }], as rankInfusions takes them
+   * @param options    { stats, boss, tempo, talismans, fights (the full set), screen, shortlist, top }
+   * @returns { searched: how many weapons were fought, skipped: the weapons without moveset data,
+   *            screen: the fights every weapon met, shortlist: how many were fought over all of them,
+   *            results: [{ weapon, level, fight: rankInfusions output, best: its fastest row }],
+   *            fastest first, only weapons that can kill the boss }
+   */
+  function* searchWeapons(model, candidates, options) {
+    const { stats, boss, tempo, talismans } = options;
+    const fights = options.fights || createFights(tempo);
+    // The first fights of the full set: every fight's cycles come from its own stream, so these
+    // are the very fights the shortlist meets again
+    const screen = { ...fights, count: Math.min(fights.count, Math.max(1, Math.floor(options.screen ?? 24))) };
+    const shortlistSize = Math.max(1, Math.floor(options.shortlist ?? 30));
+    const top = Math.max(1, Math.floor(options.top ?? 10));
+    const fight = (c, set, greases) =>
+      rankInfusionsInSteps(model, c.weapon, {
+        stats,
+        level: c.level,
+        boss,
+        tempo,
+        moveset: c.moveset,
+        physicalType: c.physicalType,
+        talismans,
+        fights: set,
+        greases,
+      });
+
+    const usable = [];
+    const skipped = [];
+    for (const c of candidates) (weaponFamilies(c.weapon, c.moveset, c.physicalType).generic ? skipped : usable).push(c);
+
+    const estimates = [];
+    for (let i = 0; i < usable.length; i++) {
+      const steps = fight(usable[i], screen, false);
+      let step;
+      while (!(step = steps.next()).done);
+      const best = fastestRow(step.value.rows);
+      if (Number.isFinite(best.sim.seconds)) estimates.push({ c: usable[i], seconds: best.sim.seconds, ar: best.result.total, i });
+      yield { stage: "screen", done: i + 1, total: usable.length };
+    }
+    estimates.sort((a, b) => a.seconds - b.seconds || b.ar - a.ar || a.i - b.i);
+    const shortlist = estimates.slice(0, shortlistSize);
+
+    const results = [];
+    for (let i = 0; i < shortlist.length; i++) {
+      const { c } = shortlist[i];
+      const steps = fight(c, fights, true);
+      let step;
+      while (!(step = steps.next()).done) yield { stage: "final", done: i, total: shortlist.length };
+      const full = step.value;
+      results.push({ weapon: c.weapon, level: c.level, fight: full, best: fastestRow(full.rows), i });
+      yield { stage: "final", done: i + 1, total: shortlist.length };
+    }
+    results.sort((a, b) => a.best.sim.seconds - b.best.sim.seconds || b.best.result.total - a.best.result.total || a.i - b.i);
+    return {
+      searched: usable.length,
+      skipped: skipped.map((c) => c.weapon),
+      screen: screen.count,
+      shortlist: shortlist.length,
+      results: results
+        .filter((r) => Number.isFinite(r.best.sim.seconds))
+        .slice(0, top)
+        .map(({ i, ...r }) => r),
+    };
   }
 
   return {
@@ -2851,7 +3204,11 @@ SOFTWARE.
     createFights,
     prepareFighter,
     simulate,
+    weaponFamilies,
+    fastestRow,
     rankInfusions,
+    rankInfusionsInSteps,
+    searchWeapons,
   };
 });
 
@@ -2956,6 +3313,17 @@ SOFTWARE.
     boss: $("boss"),
     bossHint: $("boss-hint"),
     bossCard: $("boss-card"),
+    finder: $("finder"),
+    finderTitle: $("finder-title"),
+    finderHint: $("finder-hint"),
+    finderRun: $("finder-run"),
+    finderProgress: $("finder-progress"),
+    finderBar: $("finder-bar"),
+    finderStatus: $("finder-status"),
+    finderStale: $("finder-stale"),
+    finderList: $("finder-list"),
+    finderNote: $("finder-note"),
+    finderLive: $("finder-live"),
   };
   const statInputs = {};
   const statBoxes = {};
@@ -3430,6 +3798,7 @@ SOFTWARE.
     else renderVerdict(results, ranked, build);
     renderTable(state.sort === "ar" ? ranked : results, ranked[0], build, boss, fight);
     renderLegend(results, boss, fight);
+    renderFinder(boss);
   }
 
   function renderBuild(build, sample) {
@@ -4125,6 +4494,211 @@ SOFTWARE.
     if (!boss) notes.push("Pick a boss to see which of these the weapon should use.");
     html.push(`<p class="details-notes">${notes.join(" ")}</p>`);
     return html.join("");
+  }
+
+  // ---- weapon search ---------------------------------------------------------------------------
+  // Fights every weapon against the boss, on request: it takes a few seconds, so it runs only
+  // when asked, in short slices that keep the page responsive, and its results stay until the
+  // next search (marked out of date when the attributes, talismans or upgrade level change).
+
+  const FINDER_TOP = 10;
+  const finder = {
+    run: null, // the search in progress: { bossId }
+    last: null, // the last finished search: { bossId, inputs, found }
+    drawn: null, // the search the list shows
+  };
+
+  /** What a search's results depend on, besides the boss */
+  const finderInputs = () => ({
+    attributes: STATS.map((a) => state.stats[a]).join(","),
+    talismans: state.talismans.filter(Boolean).sort().join("|"),
+    "upgrade level": String(state.level25),
+  });
+
+  let searchable = null;
+  /** The weapons a search fights (those with moveset data) and those it leaves out */
+  function searchableWeapons() {
+    if (!searchable) {
+      const fought = [];
+      const skipped = [];
+      for (const w of model.weapons) (E.weaponFamilies(w, movesetOf(w), typeOf(w)).generic ? skipped : fought).push(w);
+      searchable = { fought, skipped };
+    }
+    return searchable;
+  }
+
+  /** "glintstone staffs, sacred seals, …, Unarmed and Smithscript Dagger": classes left out whole, then single weapons */
+  function skippedText(skipped) {
+    const byClass = new Map();
+    for (const w of skipped) byClass.set(w.typeName, (byClass.get(w.typeName) || []).concat(w));
+    const parts = [];
+    const singles = [];
+    for (const [typeName, list] of byClass) {
+      const whole = model.weapons.filter((w) => w.typeName === typeName).length === list.length && list.length > 1;
+      if (!whole) singles.push(...list.map((w) => w.name));
+      else if (/ballista$/i.test(typeName)) parts.push(`${typeName.toLowerCase().slice(0, -1)}ae`);
+      else parts.push(`${typeName.toLowerCase()}s`);
+    }
+    return listText(parts.concat(singles));
+  }
+
+  const levelText = () => `+${state.level25}, somber +${E.convertLevel(state.level25, 25, 10)}`;
+
+  // A message the page posts to itself lets clicks and painting in before the next slice, as
+  // setTimeout(0) would, but without the timer's 4 ms floor or the once-a-second limit browsers
+  // put on timers in background tabs: a search keeps its pace when you look at another tab.
+  const sliceChannel = new MessageChannel();
+  const sliceWaiters = [];
+  sliceChannel.port1.onmessage = () => sliceWaiters.shift()();
+  const nextSlice = () =>
+    new Promise((resolve) => {
+      sliceWaiters.push(resolve);
+      sliceChannel.port2.postMessage(0);
+    });
+
+  async function startFinder() {
+    const boss = bossById.get(state.boss);
+    if (!boss) return;
+    const run = { bossId: boss.id };
+    finder.run = run;
+    finder.last = null;
+    const inputs = finderInputs();
+    const fights = fightsFor(boss);
+    const search = E.searchWeapons(
+      model,
+      model.weapons.map((w) => ({ weapon: w, level: levelFor(w), moveset: movesetOf(w), physicalType: typeOf(w) })),
+      { stats: { ...state.stats }, boss, tempo: tempoOf(boss), talismans: chosenTalismans(), fights, top: FINDER_TOP },
+    );
+    els.finderLive.textContent = `Searching every weapon against ${boss.name}.`;
+    showFinderProgress({ stage: "screen", done: 0, total: searchableWeapons().fought.length }, fights.count);
+    renderFinder(boss);
+
+    let step;
+    let slice = performance.now();
+    for (;;) {
+      step = search.next();
+      if (step.done) break;
+      if (performance.now() - slice > 30) {
+        showFinderProgress(step.value, fights.count);
+        await nextSlice();
+        if (finder.run !== run) return; // stopped, or the boss changed
+        slice = performance.now();
+      }
+    }
+    finder.run = null;
+    finder.last = { bossId: boss.id, inputs, found: step.value };
+    const first = step.value.results[0];
+    els.finderLive.textContent = first
+      ? `Done. Fastest against ${boss.name}: ${first.weapon.name}, ${fmtDps(first.best.sim.dps)} DPS.`
+      : `Done. No weapon can bring ${boss.name} down with this build.`;
+    renderFinder(bossById.get(state.boss) || null);
+  }
+
+  function showFinderProgress({ stage, done, total }, fightCount) {
+    // The two stages take about as long as each other
+    const share = stage === "screen" ? (0.5 * done) / total : 0.5 + (0.5 * done) / total;
+    els.finderBar.style.width = `${(share * 100).toFixed(1)}%`;
+    els.finderStatus.textContent =
+      stage === "screen"
+        ? `Fighting every weapon: ${done} of ${total}`
+        : `Fighting the ${total} closest over all ${fightCount} fights: ${done} of ${total}`;
+  }
+
+  els.finderRun.addEventListener("click", () => {
+    if (finder.run) {
+      finder.run = null;
+      els.finderLive.textContent = "Search stopped.";
+      renderFinder(bossById.get(state.boss) || null);
+    } else {
+      startFinder();
+    }
+  });
+
+  els.finderList.addEventListener("click", (e) => {
+    const row = e.target.closest(".finder-row");
+    if (row) choose(model.byName.get(row.dataset.weapon));
+  });
+
+  function renderFinder(boss) {
+    els.finder.hidden = !boss;
+    // A search belongs to its boss: picking another drops it
+    if (!boss || (finder.run && finder.run.bossId !== boss.id)) finder.run = null;
+    if (!boss || (finder.last && finder.last.bossId !== boss.id)) finder.last = null;
+    if (!boss) return;
+
+    const { fought } = searchableWeapons();
+    const running = !!finder.run;
+    const last = finder.last;
+    els.finderTitle.textContent = `Best weapons against ${boss.name}`;
+    els.finderHint.textContent =
+      `Fights all ${fought.length} weapons with moveset data in every infusion and grip, at your attributes, ` +
+      `talismans and upgrade level (${levelText()}), and lists the ${FINDER_TOP} that kill ${boss.name} fastest. Takes a few seconds.`;
+    els.finderRun.textContent = running ? "Stop" : last ? "Search again" : `Find the ${FINDER_TOP} best weapons`;
+    els.finderRun.classList.toggle("secondary", running);
+    els.finderProgress.hidden = !running;
+
+    els.finderList.hidden = !last;
+    els.finderNote.hidden = !last;
+    const now = finderInputs();
+    const changed = last ? Object.keys(now).filter((k) => now[k] !== last.inputs[k]) : [];
+    els.finder.classList.toggle("stale", changed.length > 0);
+    els.finderStale.hidden = !changed.length;
+    if (changed.length) {
+      const plural = changed.length > 1 || changed[0] !== "upgrade level";
+      els.finderStale.textContent = `Your ${listText(changed)} ${plural ? "have" : "has"} changed since this search. Search again to update the list.`;
+    }
+    if (!last) {
+      finder.drawn = null;
+      return;
+    }
+
+    // Draw the list once per search; after that only the weapon you have loaded moves, which
+    // keeps keyboard focus on the row you picked
+    if (finder.drawn !== last) {
+      finder.drawn = last;
+      const { results, skipped, screen, shortlist } = last.found;
+      const topDps = results.length ? results[0].best.sim.dps : 0;
+      els.finderList.innerHTML = results.length
+        ? results.map((r, i) => finderRowHTML(r, i, topDps)).join("")
+        : `<li class="hint">No weapon can bring ${esc(boss.name)} down with this build.</li>`;
+      els.finderNote.textContent =
+        `Select a weapon to load it. Each weapon was fought over the first ${screen} fights, then the ${shortlist} closest ` +
+        `over all ${fightsFor(boss).count}. Not searched, for want of moveset data: ${skippedText(skipped)}.`;
+    }
+    for (const row of els.finderList.querySelectorAll(".finder-row")) {
+      row.setAttribute("aria-current", String(row.dataset.weapon === weapon.name));
+    }
+  }
+
+  function finderRowHTML(r, i, topDps) {
+    const { weapon: w, best, fight } = r;
+    const sim = best.sim;
+    const how = [esc(w.typeName)];
+    if (w.infusable) how.push(esc(affinityName(best.infusion)));
+    how.push(w.paired ? "Paired" : GRIP_LABEL[best.grip]);
+    how.push(`kills in ${rangeClock(sim)}`);
+    const extra = [];
+    const greased = fight.rows
+      .filter((x) => x.grease && x.grease.sim.dps > sim.dps * 1.005)
+      .sort((a, b) => b.grease.sim.dps - a.grease.sim.dps)[0];
+    if (greased) {
+      extra.push(`<span class="finder-extra">With ${esc(greased.grease.name)}, ${esc(affinityName(greased.infusion))} reaches ${fmtDps(greased.grease.sim.dps)} DPS</span>`);
+    }
+    if (best.result.unmet.length) {
+      const needs = best.result.unmet.map((a) => `${w.requirements[a]} ${ATTR_SHORT[a]}`);
+      extra.push(`<span class="finder-extra unmet">Requirement not met: ${listText(needs)}</span>`);
+    }
+    const width = topDps > 0 ? Math.max(2, (sim.dps / topDps) * 100) : 0;
+    return (
+      `<li><button type="button" class="finder-row" data-weapon="${esc(w.name)}">` +
+      `<span class="finder-rank">${i + 1}</span>` +
+      iconHTML("weapons", w.name, "finder-icon") +
+      `<span class="finder-text"><span class="finder-name">${esc(w.name)}${w.dlc ? '<span class="badge">DLC</span>' : ""}</span>` +
+      `<span class="finder-how">${how.map((h) => `<span class="nowrap">${h}</span>`).join(" · ")}</span>${extra.join("")}</span>` +
+      `<span class="finder-dps"><span><span class="num">${fmtDps(sim.dps)}</span><span class="unit">DPS</span></span>` +
+      `<span class="bar" aria-hidden="true"><span style="--c: var(--accent); width: ${width.toFixed(1)}%"></span></span></span>` +
+      `</button></li>`
+    );
   }
 
   function renderLegend(results, boss, fight) {

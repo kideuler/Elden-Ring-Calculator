@@ -855,6 +855,193 @@ input[type="range"]:disabled {
   min-width: 0;
 }
 
+/* Weapon search: a button, then the ten weapons that kill the boss fastest */
+.finder {
+  display: grid;
+  gap: 14px;
+  padding: 18px 20px;
+}
+
+.finder-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.finder-intro {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 300px;
+  min-width: 0;
+}
+
+.finder-intro .hint {
+  max-width: 64ch;
+}
+
+.action {
+  flex: none;
+  padding: 10px 16px;
+  font: 700 14px/1.2 var(--font-body);
+  color: var(--accent-ink);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.action:hover {
+  filter: brightness(1.08);
+}
+
+.action:focus-visible,
+.finder-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--glow), 0 0 0 1px var(--accent);
+}
+
+.action.secondary {
+  color: var(--ink);
+  background: transparent;
+  border-color: var(--line);
+}
+
+.finder-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.progress {
+  height: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+  border-radius: 3px;
+}
+
+.progress span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.finder-stale {
+  margin: 0;
+  padding: 9px 12px;
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--accent-wash);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+}
+
+.finder-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transition: opacity 0.15s ease;
+}
+
+.finder.stale .finder-list {
+  opacity: 0.55;
+}
+
+.finder-row {
+  display: grid;
+  grid-template-columns: 20px 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px 7px 6px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.finder-row:hover {
+  background: var(--panel-2);
+}
+
+.finder-row[aria-current="true"] {
+  background: var(--accent-wash);
+}
+
+.finder-rank {
+  font: 600 15px/1 var(--font-display);
+  text-align: right;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.finder-icon {
+  width: 36px;
+  height: 36px;
+}
+
+.finder-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.finder-name {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.finder-how,
+.finder-extra {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+
+.finder-how .nowrap {
+  white-space: nowrap;
+}
+
+.finder-extra {
+  color: var(--ink-3);
+}
+
+.finder-extra.unmet {
+  color: var(--danger);
+}
+
+.finder-dps {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  min-width: 64px;
+  font-variant-numeric: tabular-nums;
+}
+
+.finder-dps .num {
+  font: 700 20px/1 var(--font-body);
+}
+
+.finder-dps .unit {
+  margin-left: 4px;
+  font: 700 11px/1 var(--font-body);
+  letter-spacing: 0.12em;
+  color: var(--ink-3);
+}
+
+.finder-dps .bar {
+  width: 64px;
+  height: 4px;
+}
+
 .verdict {
   position: relative;
   overflow: hidden;
@@ -1442,12 +1629,43 @@ input[type="range"]:disabled {
   .verdict {
     padding: 16px;
   }
+
+  .finder {
+    padding: 16px;
+  }
+
+  .finder-row {
+    grid-template-columns: 16px 36px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding-right: 4px;
+  }
+
+  /* The number alone, over its unit: the text gets the room */
+  .finder-dps {
+    min-width: 0;
+  }
+
+  .finder-dps .unit {
+    display: block;
+    margin: 4px 0 0;
+    text-align: right;
+  }
+
+  .finder-dps .bar {
+    display: none;
+  }
+
+  .finder-head .action {
+    width: 100%;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bar span,
   .chev,
-  .combo-icon {
+  .combo-icon,
+  .progress span,
+  .finder-list {
     transition: none;
   }
 }

@@ -12,6 +12,10 @@ leaves to attack are all counted, and so are your stamina and talismans. The cal
 out the rest itself: which grip to use, which attacks to throw in each opening, and how long the
 fight takes, with a range. The infusion with the highest AR often isn't the winner.
 
+Or let it search: with a boss picked, one button fights every weapon against it with your
+attributes and talismans, and lists the 10 that kill it fastest, each with its best infusion and
+grip.
+
 ## Use it
 
 Open `dist/elden-ring-infusion-calculator.html` in a browser. It is a single file (about 2 MB)
@@ -57,6 +61,16 @@ Select a row for the breakdown: base damage plus each attribute's bonus. With a 
 shows DPS in each grip, the attack strings it plays and how often, one hit against the boss's
 defense and negation, and the status procs. Last comes the weapon's moveset, with motion values,
 damage type, timing and stamina cost of each attack. Inputs are remembered in the browser.
+
+With a boss picked, the **Best weapons** panel searches every weapon. It runs only when you press
+its button. It fights each of the 418 weapons with moveset data in every infusion it takes and
+both grips, using your attributes, talismans and upgrade level (somber weapons at the matching
++10 level). Then it lists the 10 that kill the boss fastest. Each row gives the weapon, its best
+infusion and grip, the kill time with its range, and the DPS. It also notes a grease that would
+do better and any requirement you don't meet. Select a row to load that weapon. A search takes
+from half a second to several seconds, depending on how long the boss takes to kill, and you can
+stop it. The list stays until the next search, and is marked out of date if you change your
+attributes, talismans or upgrade level.
 
 ## How attack rating is calculated
 
@@ -199,6 +213,44 @@ still trigger St. Trina's Smile and Aged One's Exultation).
   the median number of openings, and each infusion's share of fights won. Ties go to the higher
   AR.
 
+### Searching every weapon
+
+The search fights each weapon the way the page fights one. Doing that for all 418 weapons over
+all 300 fights takes too long (up to 41 seconds), so it goes in two stages:
+
+1. **Screen**: every weapon, in every infusion and grip, over the first 24 of the boss's 300
+   fights, without greases.
+2. **Final**: the 30 fastest from the screen, over all 300 fights and with greases, exactly as the
+   page fights one weapon. They are sorted by mean kill time, then AR, and the first 10 are
+   listed, one row per weapon.
+
+Every weapon meets the same fights, because each fight draws from its own random stream seeded
+from the boss. The first 24 are the same fights whatever the size of the set, so the screen
+compares like with like.
+
+The page runs the search in slices of about 30 ms and lets clicks and painting in between them,
+so it shows its progress and can be stopped. In the final stage it can pause between one
+infusion and the next, because a single weapon over every fight can take half a second against a
+boss with a lot of HP.
+
+On 2026-11-12 the search was checked against fighting all 418 weapons over all 300 fights. The
+check covered 14 bosses and 4 builds:
+
+- DEX, with no talismans;
+- quality, with four talismans;
+- strength, with three;
+- faith, with one.
+
+The top 10 matched exactly (weapon, infusion, grip and order) in all 56 cases. The search took
+0.3–7.4 seconds in Node, against 1.5–41 for the exhaustive one.
+
+Leaving out the weapons without moveset data (listed under Limits) is deliberate. Their stand-in
+of one plain hit a second can't be fairly compared with a real moveset.
+
+Stance breaks and ripostes aren't modeled, and they reward heavy hits. So quick weapons such as
+daggers, twinblades, claws and axes fill most top-10 lists, and slow heavy weapons place lower
+than they would in the game.
+
 ### How much the tempo guess matters
 
 The tempo classes are the model's weakest input, so the ranking was checked against them on
@@ -224,8 +276,9 @@ two were close.
   skills, spells, spirit ashes and Powerstance (paired L1) attacks aren't modeled. Neither are
   projectiles or shockwaves that some attacks add (Wing of Astel, Golem Fist).
 - Status buildup doesn't drain between hits (no published rates).
-- Staffs, seals, bows and Unarmed have no moveset data and fall back to one 100 motion value
-  hit per second of opening.
+- Staffs, seals, bows, crossbows, ballistae, perfume bottles, the Smithscript Dagger and Unarmed
+  (70 weapons) have no moveset data. They fall back to one 100 motion value hit per second of
+  opening, and the weapon search leaves them out.
 - 96 of the 4,182 attack entries have no timing in the frame data, and a family with one of them
   can't be planned. 99 have no stamina cost and count as free.
 
@@ -374,7 +427,7 @@ npm test
 npm run build
 ```
 
-`npm test` runs the engine, boss, attack, fight and icon tests. `npm run build` bundles `src/` and the
+`npm test` runs the engine, boss, attack, fight, icon and search tests. `npm run build` bundles `src/` and the
 data into `dist/elden-ring-infusion-calculator.html` and `dist/artifact.html` (the same page
 without the `<html>`/`<head>`/`<body>` wrapper, for hosts that add their own).
 
@@ -412,7 +465,7 @@ npm run build:icons
 
 ## Verification
 
-`npm test` runs 41 tests.
+`npm test` runs 45 tests.
 
 - `tests/engine.test.mjs` (14): database coverage, stat curves, upgrade multipliers, the
   requirement penalty, two-handing, paired weapons and bows, infusion damage splits, status
@@ -448,10 +501,21 @@ npm run build:icons
 - `tests/icons.test.mjs` (2): every weapon and talisman has a cell of its own inside the sprite,
   whose size matches the index; and spot checks that icons come from the item's own page (an
   infobox written on one line, and the Beast Claw weapon rather than the disambiguation page).
+- `tests/search.test.mjs` (4):
+  - the tie-break that picks a weapon's best row;
+  - the stepped ranking, which ends where rankInfusions does;
+  - with a shortlist as long as the list, the search returns exactly what fighting each weapon
+    on its own and sorting does, leaving out weapons without moveset data and fighting greases
+    in the final stage;
+  - with a short shortlist, every result comes from the screen's fastest, and the screen's
+    fights are the first fights of the full set.
+- The search was also compared with an exhaustive one in 56 cases, all the same; see
+  [Searching every weapon](#searching-every-weapon).
 - The page was checked in a browser at desktop, tablet and phone widths, in light and dark
   themes, with and without a boss and with talismans, with no console errors. Re-ranking every
   infusion against a boss takes 12–84 ms; opening the full weapon list with its 488 icons takes
-  about 20 ms.
+  about 20 ms. Searching every weapon took 0.6 s against Margit, 3.2 s against Malenia and 4.1 s
+  against Rykard, with no main-thread task over 50 ms.
 
 ## Files
 
@@ -459,8 +523,8 @@ npm run build:icons
 | --- | --- |
 | `src/engine.js` | The AR math (`calculate`). Loads as `window.ArEngine` in a page or with `require` in Node |
 | `src/engine.js` (boss part) | `hitDamage`: one hit against a boss's defense and negation |
-| `src/engine.js` (fight part) | `attackFamilies`, `staminaFor`, `talismanEffects`, `createFights`, `prepareFighter`, `simulate` and `rankInfusions`: the fight model behind DPS |
-| `src/app.js` | Page logic: weapon search, the four inputs, results table and breakdowns |
+| `src/engine.js` (fight part) | `attackFamilies`, `weaponFamilies`, `staminaFor`, `talismanEffects`, `createFights`, `prepareFighter`, `simulate`, `rankInfusions` (and `rankInfusionsInSteps`) and `fastestRow`: the fight model behind DPS. `searchWeapons`: the search over every weapon |
+| `src/app.js` | Page logic: the weapon picker, the four inputs, results table, breakdowns and the best-weapons search |
 | `src/page.html`, `src/styles.css` | Page template and styles |
 | `scripts/build-db.mjs` | Builds `data/weapons.json` from the regulation export |
 | `scripts/build-bosses.mjs` | Builds `data/bosses.json` from the boss transcription and the tempo classes |
@@ -478,6 +542,7 @@ npm run build:icons
 | `tests/attacks.test.mjs` | Moveset, stamina and talisman tests |
 | `tests/fight.test.mjs` | Fight model tests |
 | `tests/icons.test.mjs` | Icon sprite tests |
+| `tests/search.test.mjs` | Weapon search tests |
 
 ## Credits
 
