@@ -7,6 +7,16 @@
 <style>
 {{STYLES}}
 </style>
+<style>
+/* Weapon and talisman icons: {{ICON_COUNT}} icons in one sprite, {{ICON_COLUMNS}} to a row. An icon's
+   --x and --y (its column and row, set by app.js) pick its cell at any display size. */
+.icon {
+  background-image: url("data:image/webp;base64,{{ICON_SPRITE}}");
+  background-repeat: no-repeat;
+  background-size: calc({{ICON_COLUMNS}} * 100%) calc({{ICON_ROWS}} * 100%);
+  background-position: calc(var(--x, 0) * 100% / {{ICON_X_STEPS}}) calc(var(--y, 0) * 100% / {{ICON_Y_STEPS}});
+}
+</style>
 <!--BODY-->
 <div class="page">
   <header class="masthead">
@@ -23,6 +33,7 @@
       <div class="field">
         <label class="label" for="weapon-input">Weapon</label>
         <div class="combo">
+          <span class="icon combo-icon" id="weapon-icon" aria-hidden="true"></span>
           <input id="weapon-input" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
             aria-controls="weapon-list" autocomplete="off" autocapitalize="off" spellcheck="false"
             placeholder="Search {{WEAPON_COUNT}} weapons">
@@ -87,22 +98,26 @@
         <p class="sample-note" id="sample-note" hidden>These are example attributes. Type in your own and the table updates as you go.</p>
       </fieldset>
 
-      <fieldset class="field">
+      <fieldset class="field field-talismans">
         <legend class="label">Talismans</legend>
         <div class="talismans">
-          <span class="select-wrap small">
+          <span class="select-wrap small with-icon">
+            <span class="icon slot-icon" id="talisman-icon-1" aria-hidden="true"></span>
             <select id="talisman-1" aria-label="Talisman 1"></select>
             <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
           </span>
-          <span class="select-wrap small">
+          <span class="select-wrap small with-icon">
+            <span class="icon slot-icon" id="talisman-icon-2" aria-hidden="true"></span>
             <select id="talisman-2" aria-label="Talisman 2"></select>
             <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
           </span>
-          <span class="select-wrap small">
+          <span class="select-wrap small with-icon">
+            <span class="icon slot-icon" id="talisman-icon-3" aria-hidden="true"></span>
             <select id="talisman-3" aria-label="Talisman 3"></select>
             <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
           </span>
-          <span class="select-wrap small">
+          <span class="select-wrap small with-icon">
+            <span class="icon slot-icon" id="talisman-icon-4" aria-hidden="true"></span>
             <select id="talisman-4" aria-label="Talisman 4"></select>
             <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
           </span>
@@ -157,6 +172,7 @@
     <p>Boss data: New Game HP, defense, damage negation and status resistance of {{BOSS_COUNT}} boss fights from the <a href="https://eldenring.wiki.fextralife.com/Bosses" target="_blank" rel="noopener">Elden Ring Wiki</a>, whose combat tables come from the game files through nex3's <a href="https://github.com/nex3/BossDataExtractor" target="_blank" rel="noopener">BossDataExtractor</a>. Status proc damage follows the wiki's Hemorrhage, Frostbite, Poison and Scarlet Rot pages.</p>
     <p>Movesets: motion values of {{MOVESET_COUNT}} weapons from the community <a href="https://docs.google.com/spreadsheets/d/1j4bpTbsnp5Xsgw9TP2xv6d8R4qk0ErpE9r_5LGIDraU/edit#gid=0" target="_blank" rel="noopener">Elden Ring Motion Values and Attack Data</a> sheet (patch 1.16), and each attack's damage type, timing and stamina cost from frame data read from the game files (patch {{TIMING_PATCH}}) by AtomechLLC's <a href="https://github.com/AtomechLLC/game-animation-library/tree/main/frame-data" target="_blank" rel="noopener">game-animation-library</a>, which follows sovietspaceship's <a href="https://er-frame-data.nyasu.business/" target="_blank" rel="noopener">Elden Ring Frame Data Explorer</a>.</p>
     <p>Talismans: effects of {{TALISMAN_COUNT}} talismans from the <a href="https://eldenring.wiki.fextralife.com/Talismans" target="_blank" rel="noopener">Elden Ring Wiki</a> and <a href="https://eldenring.wiki.gg/wiki/Talismans" target="_blank" rel="noopener">Eldenpedia</a>. How much room each boss leaves to attack is this calculator's own estimate, not game data.</p>
+    <p>Icons: the in-game icons of {{ICON_COUNT}} weapons and talismans, FromSoftware's artwork, as shown on <a href="https://eldenring.wiki.gg/wiki/Weapons" target="_blank" rel="noopener">Eldenpedia</a>'s item pages.</p>
     <p>A fan-made tool, not affiliated with FromSoftware or Bandai Namco.</p>
   </footer>
 </div>
@@ -171,6 +187,7 @@ used under the MIT license:
 <script id="boss-db" type="application/json">{{BOSSES}}</script>
 <script id="attack-db" type="application/json">{{ATTACKS}}</script>
 <script id="talisman-db" type="application/json">{{TALISMANS}}</script>
+<script id="icon-db" type="application/json">{{ICONS}}</script>
 <script>
 {{ENGINE}}
 </script>

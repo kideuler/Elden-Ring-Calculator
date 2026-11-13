@@ -14,9 +14,12 @@ fight takes, with a range. The infusion with the highest AR often isn't the winn
 
 ## Use it
 
-Open `dist/elden-ring-infusion-calculator.html` in a browser. It is a single file with all the
-data embedded, so it works offline and can be hosted anywhere. Only the two web fonts come from
-Google Fonts, and system fonts stand in without them.
+Open `dist/elden-ring-infusion-calculator.html` in a browser. It is a single file (about 2 MB)
+with all the data and icons embedded, so it works offline and can be hosted anywhere. Only the
+two web fonts come from Google Fonts, and system fonts stand in without them.
+
+Weapons and talismans show their in-game icons: in the weapon box and its list, in each talisman
+slot (an empty slot shows a dashed ring) and beside the winning infusion's name.
 
 - **Weapon**: type part of a name, a weapon type ("katana") or "dlc", then pick with the arrow
   keys and Enter. Clear the box to browse every weapon by type.
@@ -335,9 +338,33 @@ the fields and lists the talismans that aren't counted. Each of the 33 entries h
 | `after` | `{ status: [...], multiplier, seconds }`: a boost after one of these statuses procs |
 | `assumed` | `{ multiplier, share }`: an HP-dependent boost counted for a fixed share of the fight |
 
+### Icons
+
+`data/icons.webp` is a sprite of the in-game icon of every weapon and talisman: 521 icons in
+64-pixel cells, 32 to a row (2048 × 1088 pixels, about 600 KB). `scripts/build-icons.py` reads
+each item's page on [Eldenpedia](https://eldenring.wiki.gg) (the page `data/weapons.json` links
+for a weapon; the talisman's name for a talisman), takes the image in the page's infobox,
+downloads it at 128 pixels and scales it into its cell. Two pairs of weapons use the same icon
+on the wiki: the two Greatswords of Radahn, and the Butchering Knife with the Bonny Butchering
+Knife.
+
+`data/icons.json` says which cell holds which item:
+
+| Field | Contents |
+| --- | --- |
+| `meta` | Source, retrieval date, `cell` size, `columns` and `rows` |
+| `weapons`, `talismans` | Name to cell number, counted left to right and top to bottom from 0 |
+| `files` | The wiki file each icon came from |
+| `missing` | Items the wiki had no icon for (none at present); the page leaves a blank space |
+
+The page puts the sprite into one CSS rule as a data URI, so the browser decodes it once for
+every icon. Each icon is a `<span class="icon">` whose `--x` and `--y` (column and row) pick its
+cell by percentage, which works at any display size.
+
 ## Build and test
 
-Needs Node 18 or newer; there are no dependencies to install.
+Needs Node 18 or newer; there are no dependencies to install. Refreshing the icons also needs
+Python 3 with Pillow.
 
 ```bash
 npm test
@@ -347,7 +374,7 @@ npm test
 npm run build
 ```
 
-`npm test` runs the engine, boss, attack and fight tests. `npm run build` bundles `src/` and the
+`npm test` runs the engine, boss, attack, fight and icon tests. `npm run build` bundles `src/` and the
 data into `dist/elden-ring-infusion-calculator.html` and `dist/artifact.html` (the same page
 without the `<html>`/`<head>`/`<body>` wrapper, for hosts that add their own).
 
@@ -375,9 +402,17 @@ npm run build:attacks
 node scripts/build-attacks.mjs --import path/to/elden-ring.json path/to/motion-values.csv
 ```
 
+To fetch the icons again, after adding weapons or talismans or to pick up the wiki's changes.
+It makes about 25 requests to the wiki's API, then downloads the icons it doesn't have yet into a
+cache folder (by default one in the system temp folder; pass `--cache DIR` to choose):
+
+```bash
+npm run build:icons
+```
+
 ## Verification
 
-`npm test` runs 39 tests.
+`npm test` runs 41 tests.
 
 - `tests/engine.test.mjs` (14): database coverage, stat curves, upgrade multipliers, the
   requirement penalty, two-handing, paired weapons and bows, infusion damage splits, status
@@ -410,9 +445,13 @@ node scripts/build-attacks.mjs --import path/to/elden-ring.json path/to/motion-v
   that they average out to the boss's tempo, and that rankInfusions keeps the faster grip, picks
   the right grease and shares out first kills. Blood beats Keen only against a boss that can
   bleed.
-- The page was checked in a browser at desktop, tablet and phone widths, with and without a boss
-  and with talismans, with no console errors. Re-ranking every infusion against a boss takes
-  12–84 ms.
+- `tests/icons.test.mjs` (2): every weapon and talisman has a cell of its own inside the sprite,
+  whose size matches the index; and spot checks that icons come from the item's own page (an
+  infobox written on one line, and the Beast Claw weapon rather than the disambiguation page).
+- The page was checked in a browser at desktop, tablet and phone widths, in light and dark
+  themes, with and without a boss and with talismans, with no console errors. Re-ranking every
+  infusion against a boss takes 12–84 ms; opening the full weapon list with its 488 icons takes
+  about 20 ms.
 
 ## Files
 
@@ -426,23 +465,27 @@ node scripts/build-attacks.mjs --import path/to/elden-ring.json path/to/motion-v
 | `scripts/build-db.mjs` | Builds `data/weapons.json` from the regulation export |
 | `scripts/build-bosses.mjs` | Builds `data/bosses.json` from the boss transcription and the tempo classes |
 | `scripts/build-attacks.mjs` | Builds `data/attacks.json` from the motion value sheet and the frame data |
+| `scripts/build-icons.py` | Fetches the weapon and talisman icons and packs them into `data/icons.webp` |
 | `scripts/build-page.mjs` | Bundles everything into `dist/` |
 | `data/weapons.json` | The weapon database |
 | `data/bosses.json` | The boss database |
 | `data/attacks.json` | The moveset data |
 | `data/talismans.json` | The talismans the calculator counts |
+| `data/icons.webp`, `data/icons.json` | The icon sprite and which cell holds which item |
 | `data/source/` | Upstream regulation export and its MIT license, the boss transcription, the tempo classes, the motion value sheet and the trimmed frame data |
 | `tests/engine.test.mjs` | AR tests |
 | `tests/boss.test.mjs` | Boss data and hit damage tests |
 | `tests/attacks.test.mjs` | Moveset, stamina and talisman tests |
 | `tests/fight.test.mjs` | Fight model tests |
+| `tests/icons.test.mjs` | Icon sprite tests |
 
 ## Credits
 
 Game data © FromSoftware. Weapon data extraction and format by Tom Clark, used under the MIT
 license (`data/source/LICENSE-upstream.txt`). Boss numbers from the Elden Ring Wiki on Fextralife,
 extracted from the game by nex3's BossDataExtractor. Talisman effects from the Elden Ring Wiki
-and Eldenpedia. Motion values from the community Elden Ring Motion Values and Attack Data sheet;
+and Eldenpedia. Weapon and talisman icons are FromSoftware's artwork, taken from the item
+pages of Eldenpedia (eldenring.wiki.gg). Motion values from the community Elden Ring Motion Values and Attack Data sheet;
 attack timing, stamina costs and damage types from AtomechLLC's game-animation-library frame
 data, which follows sovietspaceship's Elden Ring Frame Data Explorer. Neither of those two
 sources states a license, so they're credited here and in the page footer. A fan-made tool, not

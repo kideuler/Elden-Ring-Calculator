@@ -21,6 +21,9 @@ const db = JSON.parse(read("data/weapons.json"));
 const bossDb = JSON.parse(read("data/bosses.json"));
 const attackDb = JSON.parse(read("data/attacks.json"));
 const talismanDb = JSON.parse(read("data/talismans.json"));
+const iconDb = JSON.parse(read("data/icons.json"));
+const iconSprite = readFileSync(join(root, "data/icons.webp"));
+const { columns, rows } = iconDb.meta;
 const parts = {
   STYLES: read("src/styles.css"),
   ENGINE: read("src/engine.js"),
@@ -33,6 +36,15 @@ const parts = {
   // Talismans without the notes that only document the file
   TALISMANS: JSON.stringify({ talismans: talismanDb.talismans }).replace(/</g, "\\u003c"),
   TALISMAN_COUNT: String(talismanDb.talismans.length),
+  // Icons: the sprite goes into one CSS rule as a data URI; the page gets each item's cell
+  ICON_SPRITE: iconSprite.toString("base64"),
+  ICON_COUNT: String(Object.keys(iconDb.weapons).length + Object.keys(iconDb.talismans).length),
+  ICON_COLUMNS: String(columns),
+  ICON_ROWS: String(rows),
+  // background-position percentages run from the first cell (0%) to the last (100%)
+  ICON_X_STEPS: String(Math.max(1, columns - 1)),
+  ICON_Y_STEPS: String(Math.max(1, rows - 1)),
+  ICONS: JSON.stringify({ columns, weapons: iconDb.weapons, talismans: iconDb.talismans }).replace(/</g, "\\u003c"),
   PATCH: db.meta.patch,
   WEAPON_COUNT: String(db.meta.weaponCount),
   BOSS_COUNT: String(bossDb.meta.bossCount),

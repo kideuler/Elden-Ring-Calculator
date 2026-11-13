@@ -234,6 +234,12 @@ h1 {
   .build > h2 {
     grid-column: 1 / -1;
   }
+
+  /* The talismans (four pickers, then what they do) run down beside both the attributes and
+     the boss, which moves up under the attributes */
+  .build > .field-talismans {
+    grid-row: span 2;
+  }
 }
 
 @media (min-width: 1181px) and (min-height: 780px) {
@@ -257,6 +263,19 @@ h2 {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--ink-2);
+}
+
+/* Weapon and talisman icons. The sprite, and which cell each icon shows, come from page.html and
+   app.js; an item without an icon gets an empty box, so text beside it stays lined up. */
+.icon {
+  display: inline-block;
+  flex: none;
+  width: 32px;
+  height: 32px;
+}
+
+.icon.empty {
+  background-image: none;
 }
 
 /* ---- Build panel --------------------------------------------------------------------- */
@@ -306,7 +325,7 @@ h2 {
 .combo input {
   width: 100%;
   box-sizing: border-box;
-  padding: 11px 40px 11px 12px;
+  padding: 11px 40px 11px 50px;
   font: 600 17px/1.3 var(--font-body);
   color: var(--ink);
   background: var(--field);
@@ -318,6 +337,21 @@ h2 {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 3px var(--glow);
+}
+
+.combo-icon {
+  position: absolute;
+  z-index: 1;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  margin: auto 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.combo.searching .combo-icon {
+  opacity: 0.3;
 }
 
 .combo-toggle {
@@ -366,11 +400,19 @@ h2 {
 
 .option {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 8px 10px;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 10px 4px 5px;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.option-text {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
 }
 
 .option[aria-selected="true"] {
@@ -546,17 +588,11 @@ input[type="range"]:disabled {
   border-radius: 4px;
 }
 
-/* Talismans: one picker per slot, two to a row when the field is at least ~440px wide (the
-   widths are worked out as for .stat-grid) */
+/* Talismans: one picker per slot, one to a row. With its icon, a picker needs about 280px to
+   show the longest name, so two to a row would cut names off at almost every width. */
 .talismans {
   display: grid;
   gap: 6px;
-}
-
-@media (min-width: 506px) and (max-width: 640px), (min-width: 1010px) and (max-width: 1180px) {
-  .talismans {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .talisman-effects {
@@ -631,6 +667,31 @@ input[type="range"]:disabled {
   right: 10px;
   width: 12px;
   height: 12px;
+}
+
+.select-wrap.small.with-icon select {
+  padding-left: 41px;
+}
+
+.slot-icon {
+  position: absolute;
+  z-index: 1;
+  left: 6px;
+  top: 0;
+  bottom: 0;
+  width: 28px;
+  height: 28px;
+  margin: auto 0;
+  pointer-events: none;
+}
+
+.slot-icon.empty {
+  left: 10px;
+  width: 20px;
+  height: 20px;
+  border: 1.5px dashed var(--line);
+  border-radius: 50%;
+  box-sizing: border-box;
 }
 
 .boss-card {
@@ -834,11 +895,27 @@ input[type="range"]:disabled {
 }
 
 .verdict-name {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin: 0;
   font: 600 clamp(22px, 3vw, 30px)/1.15 var(--font-display);
   letter-spacing: 0.02em;
-  text-wrap: balance;
   min-width: 0;
+}
+
+.verdict-title {
+  min-width: 0;
+  text-wrap: balance;
+}
+
+.verdict-icon {
+  width: 44px;
+  height: 44px;
+}
+
+.verdict-icon.empty {
+  display: none;
 }
 
 .verdict-name .lvl {
@@ -1369,7 +1446,8 @@ input[type="range"]:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .bar span,
-  .chev {
+  .chev,
+  .combo-icon {
     transition: none;
   }
 }

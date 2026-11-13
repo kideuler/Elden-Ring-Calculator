@@ -1,4 +1,4 @@
-/* Elden Ring Infusion Calculator: page logic. Needs window.ArEngine and the #weapon-db, #boss-db, #attack-db and #talisman-db JSON. */
+/* Elden Ring Infusion Calculator: page logic. Needs window.ArEngine and the #weapon-db, #boss-db, #attack-db, #talisman-db and #icon-db JSON. */
 (function () {
   "use strict";
 
@@ -11,6 +11,7 @@
   const attackDb = readJson("attack-db");
   const talismanDb = readJson("talisman-db");
   const talismanByName = new Map(talismanDb.talismans.map((t) => [t.name, t]));
+  const iconDb = readJson("icon-db"); // each weapon's and talisman's cell in the icon sprite
   const ATTRS = E.ATTRIBUTES;
   const STATS = ATTRS.concat(["end"]); // the attributes people enter: Endurance sets stamina
   const DMG = E.DAMAGE_TYPES;
@@ -68,7 +69,9 @@
 
   const $ = (id) => document.getElementById(id);
   const els = {
+    combo: $("weapon-input").parentElement,
     input: $("weapon-input"),
+    weaponIcon: $("weapon-icon"),
     toggle: $("weapon-toggle"),
     list: $("weapon-list"),
     meta: $("weapon-meta"),
@@ -78,6 +81,7 @@
     statHint: $("stat-hint"),
     sampleNote: $("sample-note"),
     talismans: Array.from({ length: TALISMAN_SLOTS }, (_, i) => $(`talisman-${i + 1}`)),
+    talismanIcons: Array.from({ length: TALISMAN_SLOTS }, (_, i) => $(`talisman-icon-${i + 1}`)),
     talismanEffects: $("talisman-effects"),
     verdict: $("verdict"),
     sortAr: $("sort-ar"),
@@ -141,6 +145,27 @@
   const killSeconds = (sim) => (canKill(sim) ? sim.seconds : Number.MAX_VALUE);
   const rangeClock = (sim) => `${fmtClock(sim.seconds)} (${fmtClock(sim.p10)}–${fmtClock(sim.p90)})`;
   const mvText = (mvs) => mvs.map((v) => Number(v.toFixed(1))).join(" + ");
+  /** Where an item's icon is in the sprite ("weapons" or "talismans"), or null if it has none */
+  const iconCell = (kind, name) => {
+    const i = iconDb[kind][name];
+    return i === undefined ? null : { x: i % iconDb.columns, y: Math.floor(i / iconDb.columns) };
+  };
+  /** An item's icon as HTML: an empty box when it has none, so the text beside it stays lined up */
+  const iconHTML = (kind, name, className) => {
+    const cell = iconCell(kind, name);
+    return cell
+      ? `<span class="icon ${className}" style="--x:${cell.x};--y:${cell.y}" aria-hidden="true"></span>`
+      : `<span class="icon ${className} empty" aria-hidden="true"></span>`;
+  };
+  /** Points an icon that stays on the page at an item, or empties it */
+  const showIcon = (el, kind, name) => {
+    const cell = name ? iconCell(kind, name) : null;
+    el.classList.toggle("empty", !cell);
+    if (cell) {
+      el.style.setProperty("--x", String(cell.x));
+      el.style.setProperty("--y", String(cell.y));
+    }
+  };
   const stringLabel = (p) => `${p.attacks}× ${p.label}`;
 
   // ---- movesets, talismans and fights ------------------------------------------------------
@@ -286,14 +311,20 @@
       }
       html.push(
         `<li class="option" role="option" id="opt-${w.index}" data-index="${w.index}" aria-selected="${i === active}">` +
-          `<span class="option-name">${esc(w.name)}${w.dlc ? '<span class="badge">DLC</span>' : ""}</span>` +
-          `<span class="option-type">${esc(w.typeName)}</span></li>`,
+          iconHTML("weapons", w.name, "option-icon") +
+          `<span class="option-text"><span class="option-name">${esc(w.name)}${w.dlc ? '<span class="badge">DLC</span>' : ""}</span>` +
+          `<span class="option-type">${esc(w.typeName)}</span></span></li>`,
       );
     });
     els.list.innerHTML = html.join("");
     els.list.hidden = false;
     els.input.setAttribute("aria-expanded", "true");
     showActive();
+  }
+
+  /** The input holds a search rather than the chosen weapon's name */
+  function syncSearching() {
+    els.combo.classList.toggle("searching", els.input.value !== weapon.name);
   }
 
   function closeList() {
@@ -337,7 +368,10 @@
     els.input.select();
     openList("");
   });
-  els.input.addEventListener("input", () => openList(els.input.value));
+  els.input.addEventListener("input", () => {
+    syncSearching();
+    openList(els.input.value);
+  });
   els.input.addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
@@ -358,6 +392,7 @@
         e.preventDefault();
         closeList();
         els.input.value = weapon.name;
+        syncSearching();
         els.input.select();
       }
     }
@@ -365,6 +400,7 @@
   els.input.addEventListener("blur", () => {
     closeList();
     els.input.value = weapon.name;
+    syncSearching();
   });
   els.list.addEventListener("mousedown", (e) => e.preventDefault()); // keep focus in the input
   els.list.addEventListener("click", (e) => {
@@ -540,6 +576,8 @@
   function renderBuild(build, sample) {
     const { level, effects, stats, stamina } = build;
     if (document.activeElement !== els.input) els.input.value = weapon.name;
+    showIcon(els.weaponIcon, "weapons", weapon.name);
+    syncSearching();
 
     const meta = [
       `<span>${esc(weapon.typeName)}</span>`,
@@ -593,6 +631,7 @@
         option.disabled = !!t && others.some((other) => conflicts(other, t));
       }
       select.value = state.talismans[slot];
+      showIcon(els.talismanIcons[slot], "talismans", state.talismans[slot]);
     });
     els.talismanEffects.hidden = !talismans.length;
     els.talismanEffects.innerHTML = talismans.map((t) => `<li><strong>${esc(t.name)}</strong> ${esc(t.effect)}</li>`).join("");
@@ -694,7 +733,8 @@
       `<div class="verdict-label">${weapon.infusable ? "Best infusion at your attributes" : "Attack rating at your attributes"}</div>`,
     );
     html.push(
-      `<div class="verdict-main"><p class="verdict-name">${esc(best.inf.name)}<span class="lvl">${plusLevel(build.level)}</span></p>` +
+      `<div class="verdict-main"><p class="verdict-name">${iconHTML("weapons", weapon.name, "verdict-icon")}` +
+        `<span class="verdict-title">${esc(best.inf.name)}<span class="lvl">${plusLevel(build.level)}</span></span></p>` +
         `<div class="verdict-ar"><span class="num">${total}</span><span class="unit">AR</span></div></div>`,
     );
     if (r.total > 0) html.push(`<div class="bar big" aria-hidden="true">${barHTML(r, r.total)}</div>`);
@@ -780,7 +820,8 @@
     const html = [];
     html.push(`<div class="verdict-label">${weapon.infusable ? "Best infusion against" : "Against"} ${esc(boss.name)}</div>`);
     html.push(
-      `<div class="verdict-main"><p class="verdict-name">${esc(best.inf.name)}<span class="lvl">${plusLevel(build.level)}</span></p>` +
+      `<div class="verdict-main"><p class="verdict-name">${iconHTML("weapons", weapon.name, "verdict-icon")}` +
+        `<span class="verdict-title">${esc(best.inf.name)}<span class="lvl">${plusLevel(build.level)}</span></span></p>` +
         `<div class="verdict-ar"><span class="num">${fmtDps(sim.dps)}</span><span class="unit">DPS</span></div></div>`,
     );
     const parts = damageParts(sim);

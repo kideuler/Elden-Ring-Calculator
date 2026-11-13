@@ -7,8 +7,9 @@
     "build:db": "node scripts/build-db.mjs",
     "build:bosses": "node scripts/build-bosses.mjs",
     "build:attacks": "node scripts/build-attacks.mjs",
+    "build:icons": "python3 -I scripts/build-icons.py",
     "build": "node scripts/build-page.mjs",
-    "test": "node --test tests/engine.test.mjs tests/boss.test.mjs tests/attacks.test.mjs tests/fight.test.mjs"
+    "test": "node --test tests/engine.test.mjs tests/boss.test.mjs tests/attacks.test.mjs tests/fight.test.mjs tests/icons.test.mjs"
   },
   "license": "MIT"
 }
