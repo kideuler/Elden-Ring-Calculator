@@ -1,5 +1,5 @@
-/* Layout: a smithing-table workbench. The build panel (weapon, upgrade, grip, attributes) sits
-   beside the infusion ledger on wide screens and stacks above it on phones. */
+/* Layout: a smithing-table workbench. The build panel (weapon, upgrade, attributes, talismans,
+   boss) sits beside the infusion ledger on wide screens and stacks above it on phones. */
 :root {
   --bg: #e7e9e4;
   --panel: #f6f7f3;
@@ -442,58 +442,24 @@ input[type="range"]:disabled {
   opacity: 0.5;
 }
 
-/* Grip segmented control */
-.seg {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  background: var(--field);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-
-.seg input {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.seg label {
-  padding: 9px 8px;
-  text-align: center;
-  font-weight: 600;
-  color: var(--ink-2);
-  cursor: pointer;
-}
-
-.seg label + input + label {
-  border-left: 1px solid var(--line);
-}
-
-.seg input:checked + label {
-  background: var(--ink);
-  color: var(--panel);
-}
-
-.seg input:focus-visible + label {
-  outline: 2px solid var(--accent);
-  outline-offset: -3px;
-}
-
-.seg input:disabled + label {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-/* Attributes */
+/* Attributes: three to a row, or all six when the field is at least ~400px wide. The field is
+   280px beside the table (1181px and up), half the panel from 641px to 1180px, and the whole
+   panel on phones, so the breakpoints below follow those widths. */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px 8px;
+}
+
+@media (min-width: 466px) and (max-width: 640px), (min-width: 930px) and (max-width: 1180px) {
+  .stat-grid {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
 }
 
 .stat {
   display: grid;
+  align-content: start; /* a box with a two-line note keeps its input level with the others */
   gap: 5px;
   text-align: center;
   min-width: 0;
@@ -578,6 +544,44 @@ input[type="range"]:disabled {
   color: var(--ink-2);
   background: var(--accent-wash);
   border-radius: 4px;
+}
+
+/* Talismans: one picker per slot, two to a row when the field is at least ~440px wide (the
+   widths are worked out as for .stat-grid) */
+.talismans {
+  display: grid;
+  gap: 6px;
+}
+
+@media (min-width: 506px) and (max-width: 640px), (min-width: 1010px) and (max-width: 1180px) {
+  .talismans {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.talisman-effects {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+
+.talisman-effects li {
+  padding-left: 10px;
+  border-left: 2px solid var(--accent-line);
+}
+
+.talisman-effects strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.talisman-effects strong::after {
+  content: ":";
 }
 
 /* Boss picker */
@@ -727,15 +731,6 @@ input[type="range"]:disabled {
   color: var(--ink-3);
 }
 
-.neg.in-use {
-  box-shadow: inset 0 -3px 0 var(--ink-2);
-}
-
-.neg.in-use dt {
-  font-weight: 700;
-  color: var(--ink);
-}
-
 .resist {
   display: grid;
   gap: 4px;
@@ -789,101 +784,6 @@ input[type="range"]:disabled {
   font-size: 12px;
   line-height: 1.4;
   color: var(--ink-3);
-}
-
-/* Fight settings */
-.assume {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.assume > summary {
-  position: relative;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 8px;
-  padding: 9px 12px 9px 28px;
-  font-size: 13px;
-  list-style: none;
-  cursor: pointer;
-}
-
-.assume > summary::-webkit-details-marker {
-  display: none;
-}
-
-.assume > summary::before {
-  content: "";
-  position: absolute;
-  left: 12px;
-  top: 15px;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid var(--ink-3);
-  border-bottom: 1.5px solid var(--ink-3);
-  transform: rotate(-45deg);
-  transition: transform 0.15s ease;
-}
-
-.assume[open] > summary {
-  border-bottom: 1px solid var(--line);
-}
-
-.assume[open] > summary::before {
-  transform: rotate(45deg);
-}
-
-.assume-title {
-  font-weight: 700;
-  color: var(--ink);
-}
-
-.assume-summary {
-  color: var(--ink-3);
-}
-
-.assume-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  padding: 12px 12px 0;
-}
-
-.assume-field {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ink-2);
-}
-
-.assume-field:first-child {
-  grid-column: 1 / -1;
-}
-
-.assume-field input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 7px 9px;
-  font: 600 16px/1.3 var(--font-body);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-  background: var(--field);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.assume-field input:focus {
-  border-color: var(--accent);
-  outline: none;
-  box-shadow: 0 0 0 3px var(--glow);
-}
-
-.assume > .hint {
-  padding: 10px 12px 12px;
 }
 
 /* ---- Results ------------------------------------------------------------------------- */
@@ -1263,10 +1163,18 @@ input[type="range"]:disabled {
   opacity: 0.4;
 }
 
-.kill {
+.ledger .kill {
   margin-top: 5px;
   font-size: 12px;
+  line-height: 1.45;
   color: var(--ink-3);
+  white-space: normal; /* wraps on phones, so the Procs column still fits */
+}
+
+/* What the infusion would do with its best grease */
+.kill .grease {
+  color: var(--ink-2);
+  font-weight: 600;
 }
 
 .ledger .col-scale {
@@ -1355,11 +1263,26 @@ input[type="range"]:disabled {
   margin: 6px 0 0;
 }
 
-.breakdown .hits {
-  min-width: 14ch;
-  max-width: 32ch;
+/* Moveset tables: one row per attack string or attack */
+.breakdown.attacks .mvs {
+  min-width: 10ch;
+  max-width: 30ch;
   white-space: normal;
   text-align: left;
+}
+
+.breakdown.attacks .type,
+.breakdown.attacks thead th:first-child {
+  text-align: left;
+}
+
+.breakdown.attacks tr.chosen > th,
+.breakdown.attacks tr.chosen > td {
+  background: var(--accent-wash);
+}
+
+.breakdown.attacks .tag {
+  margin-left: 6px;
 }
 
 /* Legend + footer */
@@ -1379,6 +1302,11 @@ input[type="range"]:disabled {
 .legend p {
   margin: 0;
   max-width: 80ch;
+}
+
+.legend-notes {
+  display: grid;
+  gap: 8px;
 }
 
 .footer {
@@ -1441,8 +1369,7 @@ input[type="range"]:disabled {
 
 @media (prefers-reduced-motion: reduce) {
   .bar span,
-  .chev,
-  .assume > summary::before {
+  .chev {
     transition: none;
   }
 }

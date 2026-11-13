@@ -1,6 +1,6 @@
 <title>Elden Ring Infusion Calculator</title>
 <meta name="claude:viewport-fit-sides" content="cover">
-<meta name="description" content="Attack rating for every infusion of any Elden Ring weapon at your stats. Patch 1.17, Shadow of the Erdtree included.">
+<meta name="description" content="Which infusion of an Elden Ring weapon kills a boss fastest at your attributes and talismans, and its attack rating with every infusion. Patch 1.17, Shadow of the Erdtree included.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
@@ -12,7 +12,7 @@
   <header class="masthead">
     <p class="eyebrow">Elden Ring · Patch {{PATCH}} · Shadow of the Erdtree included</p>
     <h1>Infusion Calculator</h1>
-    <p class="lede">Pick a weapon and enter your stats to see its attack rating with every infusion, from Standard to Occult. Add a boss to find the infusion that kills it fastest.</p>
+    <p class="lede">Pick a weapon, enter your attributes and talismans, and see its attack rating with every infusion. Add a boss to find the infusion that kills it fastest, and the grip and attacks to use.</p>
     <div class="rule" aria-hidden="true"></div>
   </header>
 
@@ -44,17 +44,14 @@
       </div>
 
       <fieldset class="field">
-        <legend class="label">Grip</legend>
-        <div class="seg" role="radiogroup" aria-label="Grip">
-          <input type="radio" name="grip" id="grip-1h" value="1h"><label for="grip-1h">One-handed</label>
-          <input type="radio" name="grip" id="grip-2h" value="2h"><label for="grip-2h">Two-handed</label>
-        </div>
-        <p class="hint" id="grip-hint"></p>
-      </fieldset>
-
-      <fieldset class="field">
         <legend class="label">Attributes</legend>
         <div class="stat-grid">
+          <div class="stat" id="box-end">
+            <label for="stat-end" title="Endurance">END</label>
+            <input id="stat-end" type="number" inputmode="numeric" min="1" max="99" step="1">
+            <div class="steppers"><button type="button" data-attr="end" data-step="-1" aria-label="Lower Endurance">−</button><button type="button" data-attr="end" data-step="1" aria-label="Raise Endurance">+</button></div>
+            <span class="req" id="req-end"></span>
+          </div>
           <div class="stat" id="box-str">
             <label for="stat-str" title="Strength">STR</label>
             <input id="stat-str" type="number" inputmode="numeric" min="1" max="99" step="1">
@@ -86,7 +83,32 @@
             <span class="req" id="req-arc"></span>
           </div>
         </div>
-        <p class="sample-note" id="sample-note" hidden>These are example stats. Type in your own and the table updates as you go.</p>
+        <p class="hint" id="stat-hint"></p>
+        <p class="sample-note" id="sample-note" hidden>These are example attributes. Type in your own and the table updates as you go.</p>
+      </fieldset>
+
+      <fieldset class="field">
+        <legend class="label">Talismans</legend>
+        <div class="talismans">
+          <span class="select-wrap small">
+            <select id="talisman-1" aria-label="Talisman 1"></select>
+            <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </span>
+          <span class="select-wrap small">
+            <select id="talisman-2" aria-label="Talisman 2"></select>
+            <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </span>
+          <span class="select-wrap small">
+            <select id="talisman-3" aria-label="Talisman 3"></select>
+            <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </span>
+          <span class="select-wrap small">
+            <select id="talisman-4" aria-label="Talisman 4"></select>
+            <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+          </span>
+        </div>
+        <ul class="talisman-effects" id="talisman-effects" hidden></ul>
+        <p class="hint">Only talismans that change these numbers are listed. Counter-hit, guard counter, critical, mounted, dash, roll and skill talismans aren't counted.</p>
       </fieldset>
 
       <div class="field field-boss">
@@ -97,35 +119,8 @@
           </select>
           <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
         </div>
-        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it, counting its defenses, damage negation and status resistances.</p>
+        <p class="hint" id="boss-hint">Pick a boss to rank infusions by how fast they kill it. The calculator works out the grip and the attacks, from the boss's defenses, resistances and how much room it leaves to attack.</p>
         <div class="boss-card" id="boss-card" hidden></div>
-        <details class="assume" id="assume" hidden>
-          <summary><span class="assume-title">Fight settings</span> <span class="assume-summary" id="assume-summary"></span></summary>
-          <div class="assume-grid">
-            <label class="assume-field" for="phys-type">
-              <span>Physical hits</span>
-              <span class="select-wrap small">
-                <select id="phys-type">
-                  <option value="auto" id="phys-auto">Weapon default</option>
-                  <option value="standard">Standard</option>
-                  <option value="slash">Slash</option>
-                  <option value="strike">Strike</option>
-                  <option value="pierce">Pierce</option>
-                </select>
-                <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 5l5 5 5-5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-              </span>
-            </label>
-            <label class="assume-field" for="pace">
-              <span>Seconds per hit</span>
-              <input id="pace" type="number" inputmode="decimal" min="0.5" max="10" step="0.5">
-            </label>
-            <label class="assume-field" for="motion">
-              <span>Motion value</span>
-              <input id="motion" type="number" inputmode="numeric" min="10" max="1000" step="5">
-            </label>
-          </div>
-          <p class="hint">Bosses resist the four physical types differently, and your weapon's moveset decides which you deal. Seconds per hit is your pace through the whole fight, dodging included; it sets how much poison, rot and frost add. Motion value is the attack's strength in percent: about 100 for a one-handed light attack, more for heavy and charged attacks.</p>
-        </details>
       </div>
     </section>
 
@@ -150,9 +145,9 @@
 
       <div class="legend">
         <div class="legend-keys" id="legend-keys"></div>
-        <p>Select an infusion to see where its damage comes from. Numbers are rounded down, like the game's status screen. AR adds up every damage type, but enemies defend against each type separately, so split damage (physical plus an element) usually lands for a little less than its total suggests.</p>
+        <p id="legend-ar">Select an infusion to see where its damage comes from. Numbers are rounded down, like the game's status screen. AR adds up every damage type, but enemies defend against each type separately, so split damage (physical plus an element) usually lands for a little less than its total suggests.</p>
         <p id="legend-extra" hidden></p>
-        <p id="legend-boss" hidden></p>
+        <div class="legend-notes" id="legend-boss" hidden></div>
       </div>
     </section>
   </main>
@@ -160,6 +155,8 @@
   <footer class="footer">
     <p>Weapon data: Elden Ring patch {{PATCH}} game params (base damage, upgrade multipliers, stat curves, damage-type scaling and status effects) as extracted by Tom Clark's open-source <a href="https://github.com/ThomasJClark/elden-ring-weapon-calculator" target="_blank" rel="noopener">Elden Ring weapon calculator</a> (MIT license). Results are cross-checked against <a href="https://eldenring.tclark.io" target="_blank" rel="noopener">eldenring.tclark.io</a>.</p>
     <p>Boss data: New Game HP, defense, damage negation and status resistance of {{BOSS_COUNT}} boss fights from the <a href="https://eldenring.wiki.fextralife.com/Bosses" target="_blank" rel="noopener">Elden Ring Wiki</a>, whose combat tables come from the game files through nex3's <a href="https://github.com/nex3/BossDataExtractor" target="_blank" rel="noopener">BossDataExtractor</a>. Status proc damage follows the wiki's Hemorrhage, Frostbite, Poison and Scarlet Rot pages.</p>
+    <p>Movesets: motion values of {{MOVESET_COUNT}} weapons from the community <a href="https://docs.google.com/spreadsheets/d/1j4bpTbsnp5Xsgw9TP2xv6d8R4qk0ErpE9r_5LGIDraU/edit#gid=0" target="_blank" rel="noopener">Elden Ring Motion Values and Attack Data</a> sheet (patch 1.16), and each attack's damage type, timing and stamina cost from frame data read from the game files (patch {{TIMING_PATCH}}) by AtomechLLC's <a href="https://github.com/AtomechLLC/game-animation-library/tree/main/frame-data" target="_blank" rel="noopener">game-animation-library</a>, which follows sovietspaceship's <a href="https://er-frame-data.nyasu.business/" target="_blank" rel="noopener">Elden Ring Frame Data Explorer</a>.</p>
+    <p>Talismans: effects of {{TALISMAN_COUNT}} talismans from the <a href="https://eldenring.wiki.fextralife.com/Talismans" target="_blank" rel="noopener">Elden Ring Wiki</a> and <a href="https://eldenring.wiki.gg/wiki/Talismans" target="_blank" rel="noopener">Eldenpedia</a>. How much room each boss leaves to attack is this calculator's own estimate, not game data.</p>
     <p>A fan-made tool, not affiliated with FromSoftware or Bandai Namco.</p>
   </footer>
 </div>
@@ -172,6 +169,8 @@ used under the MIT license:
 -->
 <script id="weapon-db" type="application/json">{{DATA}}</script>
 <script id="boss-db" type="application/json">{{BOSSES}}</script>
+<script id="attack-db" type="application/json">{{ATTACKS}}</script>
+<script id="talisman-db" type="application/json">{{TALISMANS}}</script>
 <script>
 {{ENGINE}}
 </script>

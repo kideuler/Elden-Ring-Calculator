@@ -1,4 +1,5 @@
 // Run with: node --test tests/boss.test.mjs
+// The boss data and what one hit deals to a boss. The fights themselves are in fight.test.mjs.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -6,9 +7,7 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const Engine = require("../src/engine.js");
-const weaponDb = JSON.parse(readFileSync(new URL("../data/weapons.json", import.meta.url), "utf8"));
 const bossDb = JSON.parse(readFileSync(new URL("../data/bosses.json", import.meta.url), "utf8"));
-const model = Engine.createModel(weaponDb);
 const bossById = new Map(bossDb.bosses.map((b) => [b.id, b]));
 
 const near = (actual, expected, tolerance = 1e-9, message = "") =>
@@ -32,15 +31,16 @@ function fakeBoss({ hp = 10000, defense = 100, negation = {}, status = {}, statu
   };
 }
 
-function realResult(weaponName, affinityName, stats, level = 25) {
-  const weapon = model.byName.get(weaponName);
-  const affinityId = [...model.affinityNames].find(([, n]) => n === affinityName)[0];
-  const infusion = weapon.infusions.find((i) => i.affinity === affinityId);
-  return Engine.calculate(model, weapon, infusion, { stats, level, twoHanded: false });
-}
-
 test("boss database is well-formed", () => {
   const { bosses } = bossDb;
+  const { tempo } = bossDb.meta;
+  assert.equal(tempo.shape, 3);
+  assert.equal(tempo.spread, 0.25);
+  assert.ok(tempo.classes.standard, "the fallback class exists");
+  for (const [id, c] of Object.entries(tempo.classes)) {
+    assert.ok(c.label && c.description, `${id} is described`);
+    assert.ok(c.opening > 0 && c.opening < 12 && c.gap > 0 && c.gap < 20, `${id} opening ${c.opening}, gap ${c.gap}`);
+  }
   assert.equal(bosses.length, bossDb.meta.bossCount);
   assert.ok(bosses.length >= 80);
   assert.equal(new Set(bosses.map((b) => b.id)).size, bosses.length, "ids are unique");
@@ -56,7 +56,10 @@ test("boss database is well-formed", () => {
       if (s) for (let i = 1; i < s.length; i++) assert.ok(s[i] >= s[i - 1], `${b.label} ${t} resistance never drops`);
     }
     assert.ok([0.5, 0.65, 0.7].includes(b.statusDamage), `${b.label} status damage`);
+    assert.ok(tempo.classes[b.tempo], `${b.label} has a tempo class (${b.tempo})`);
   }
+  assert.equal(bossById.get("malenia-blade-of-miquella").tempo, "aggressive");
+  assert.equal(bossById.get("fire-giant").tempo, "heavy");
 
   const margit = bossById.get("margit-the-fell-omen-stormveil-castle");
   assert.equal(margit.hp, 4174);
@@ -111,85 +114,22 @@ test("each damage type meets its own defense and negation", () => {
   assert.ok(split < pure * 0.9, `split ${split} vs pure ${pure}`);
 });
 
-test("a fight without status effects takes ceil(HP / damage) hits", () => {
-  const boss = fakeBoss();
-  const result = fakeResult({ physical: 800 }); // 8x defense: 90% gets through, 720 a hit
-  const fight = Engine.fightBoss(result, boss, { secondsPerHit: 2 });
-  near(fight.hit.total, 720);
-  assert.equal(fight.hits, 14);
-  near(fight.seconds, (2 * 10000) / 720, 1e-9, "only the needed part of the last swing counts");
-  near(fight.dps, 360, 1e-9, "DPS is damage per hit / seconds per hit");
-  assert.deepEqual(fight.procs, {});
-});
-
-test("bleed procs get harder each time and deal a share of max HP", () => {
-  const boss = fakeBoss({ status: { bleed: [300, 400, 700] } });
-  const fight = Engine.fightBoss(fakeResult({}, { bleed: 100 }), boss, { secondsPerHit: 2 });
-  // Each proc deals (15% x 10,000 + 100) x 70% = 1,120; nine are needed.
-  // Procs land on hits 3, 7, 14, then every 7 hits: 21, 28, 35, 42, 49, 56.
-  assert.equal(fight.procs.bleed, 9);
-  assert.deepEqual(fight.procHits.bleed, [3, 7, 14, 21, 28, 35, 42, 49, 56]);
-  assert.equal(fight.hits, 56);
-  near(fight.sources.bleed, 9 * 1120);
-  // The ninth proc needed 1,040 of its 1,120 damage
-  near(fight.seconds, 110 + (2 * 1040) / 1120, 1e-9);
-});
-
-test("each bleed proc needs the boss's next threshold (Divine Beast Dancing Lion)", () => {
-  const lion = bossById.get("divine-beast-dancing-lion-belurat-tower-settlement");
-  assert.deepEqual(lion.status.bleed, [293, 335, 433, 723, 1180]);
-  const blood = realResult("Uchigatana", "Blood", { str: 18, dex: 40, int: 9, fai: 10, arc: 45 });
-  near(blood.status.bleed.total, 108.8, 0.05);
-
-  // About 109 buildup a hit: 293 takes 3 hits, 335 takes 4, 433 takes 4, 723 takes 7, then
-  // 1,180 takes 11 for every proc after that
-  const fight = Engine.fightBoss(blood, lion, { physicalType: "slash" });
-  assert.deepEqual(fight.procHits.bleed, [3, 7, 11, 18, 29, 40]);
-  assert.equal(fight.hits, 43);
-
-  // If the threshold stayed at 293, bleed would proc every 3 hits and the fight would be far shorter
-  const flat = Engine.fightBoss(blood, { ...lion, status: { ...lion.status, bleed: [293] } }, { physicalType: "slash" });
-  assert.deepEqual(flat.procHits.bleed.slice(0, 5), [3, 6, 9, 12, 15]);
-  assert.ok(flat.seconds < fight.seconds * 0.7, `${flat.seconds} vs ${fight.seconds}`);
-});
-
-test("frostbite adds 20% to the following 30 seconds of hits", () => {
-  const boss = fakeBoss({ status: { frost: [100] } });
-  const fight = Engine.fightBoss(fakeResult({ physical: 800 }, { frost: 100 }), boss, { secondsPerHit: 2 });
-  // Hit 1: 720 + frost (10% x 10,000 + 30) x 70% = 721. The remaining 8,559 HP falls to
-  // 864-damage hits (720 x 1.2), so 10 more hits: 11 in all instead of 14.
-  assert.equal(fight.procs.frost, 1);
-  near(fight.sources.frost, 721);
-  assert.equal(fight.hits, 11);
-  near(fight.seconds, 20 + (2 * 783) / 864, 1e-9, "783 HP is left for the last hit");
-});
-
-test("poison ticks between hits and can't build up while active", () => {
-  const boss = fakeBoss({ status: { poison: [100] } });
-  const fight = Engine.fightBoss(fakeResult({}, { poison: 1000 }), boss, { secondsPerHit: 2 });
-  // Procs on the first hit (t = 2s) and again each time it wears off, so 14 HP/s
-  // (0.07% x 10,000 + 7) flows without a gap.
-  near(fight.seconds, 2 + 10000 / 14, 1e-6);
-  assert.equal(fight.procs.poison, 8);
-  near(fight.sources.poison, 10000, 1e-6);
-});
-
-test("statuses the boss is immune to add nothing", () => {
-  const fight = Engine.fightBoss(fakeResult({ physical: 800 }, { bleed: 80, frost: 60 }), fakeBoss(), {});
-  assert.deepEqual(fight.immune.sort(), ["bleed", "frost"]);
-  assert.deepEqual(fight.procs, {});
-  assert.equal(fight.hits, 14);
-});
-
-test("blood beats keen against a bleed-prone boss but not a bleed-immune one", () => {
-  const stats = { str: 18, dex: 40, int: 9, fai: 10, arc: 45 };
-  const keen = realResult("Uchigatana", "Keen", stats);
-  const blood = realResult("Uchigatana", "Blood", stats);
-  const apostle = bossById.get("godskin-apostle-godskin-duo");
-  const radagon = bossById.get("radagon-of-the-golden-order");
-  assert.equal(radagon.status.bleed, null);
-
-  const time = (result, boss) => Engine.fightBoss(result, boss, { physicalType: "slash" }).seconds;
-  assert.ok(time(blood, apostle) < time(keen, apostle), "blood kills the Godskin Apostle faster");
-  assert.ok(time(keen, radagon) < time(blood, radagon), "keen kills Radagon faster");
+test("talismans multiply attack before defense, and a grease adds flat attack", () => {
+  const boss = fakeBoss({ negation: { fire: 20 } });
+  const share = Engine.defenseMultiplier;
+  const hit = Engine.hitDamage(fakeResult({ physical: 200 }), boss, {
+    multiplier: 1.1, // e.g. a Winged Sword Insignia stage
+    typeMultipliers: { fire: 1.12 }, // Fire Scorpion Charm
+    bonus: { fire: 85 }, // Fire Grease
+  });
+  const physical = 200 * 1.1;
+  const fire = 85 * 1.1 * 1.12;
+  near(hit.perType.physical.attack, physical);
+  near(hit.perType.fire.attack, fire);
+  near(hit.perType.physical.dealt, physical * share(physical, 100));
+  near(hit.perType.fire.dealt, fire * share(fire, 100) * 0.8, 1e-9, "the grease's fire meets fire defense and negation");
+  near(hit.total, hit.perType.physical.dealt + hit.perType.fire.dealt);
+  // A multiplier is worth more than its percentage while attack is below 8x defense
+  const plain = Engine.hitDamage(fakeResult({ physical: 200 }), boss).total;
+  assert.ok(hit.perType.physical.dealt / plain > 1.1);
 });

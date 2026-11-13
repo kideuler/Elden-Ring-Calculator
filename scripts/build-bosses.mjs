@@ -14,6 +14,11 @@
  * [physical, magic, fire, lightning, holy] for bosses that are built like players (they wear
  * armor). Status thresholds list the buildup needed for the first proc, then for each later proc.
  *
+ * A second input, data/source/boss-tempo.json, says how much room each boss leaves to attack. It
+ * is an estimate, not game data: each boss is placed in one of a few tempo classes, and each
+ * class has a typical opening (seconds you can attack for) and gap (seconds the boss attacks
+ * for in between). Every boss gets its class as `tempo`; the classes go into meta.tempo.
+ *
  * Usage: node scripts/build-bosses.mjs [source.jsonl] [out.json]
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -74,6 +79,13 @@ const pages = readFileSync(sourcePath, "utf8")
     }
   });
 
+const tempo = JSON.parse(readFileSync(join(root, "data/source/boss-tempo.json"), "utf8"));
+for (const [id, c] of Object.entries(tempo.classes)) {
+  if (!(c.opening > 0) || !(c.gap >= 0) || !c.label) fail(`tempo class ${id} needs a label, an opening and a gap`);
+}
+if (!tempo.classes.standard) fail("boss-tempo.json needs a standard class");
+const tempoUsed = new Set();
+
 const bosses = [];
 for (const page of pages) {
   for (const entry of page.e) {
@@ -108,6 +120,11 @@ for (const page of pages) {
       }
     }
 
+    const tempoClass = tempo.bosses[name];
+    if (!tempoClass) fail(`${where}: no tempo class in data/source/boss-tempo.json`);
+    if (!tempo.classes[tempoClass]) fail(`${where}: unknown tempo class ${tempoClass}`);
+    tempoUsed.add(name);
+
     const dlc = !!page.dlc;
     const statusDamage = dlc
       ? STATUS_DAMAGE_65.has(name)
@@ -127,6 +144,7 @@ for (const page of pages) {
       negation: Object.fromEntries(NEGATION_TYPES.map((t, i) => [t, negation[i]])),
       status,
       statusDamage,
+      tempo: tempoClass,
       wiki: `https://eldenring.wiki.fextralife.com/${page.page}`,
     });
   }
@@ -148,6 +166,10 @@ for (const boss of bosses) {
   ids.add(boss.id);
 }
 
+for (const name of Object.keys(tempo.bosses)) {
+  if (!tempoUsed.has(name)) fail(`boss-tempo.json lists "${name}", which isn't in the boss data`);
+}
+
 bosses.sort((a, b) => Number(a.dlc) - Number(b.dlc) || a.label.localeCompare(b.label));
 
 const out = {
@@ -161,11 +183,14 @@ const out = {
       retrieved: "2026-11-11",
     },
     builtBy: "scripts/build-bosses.mjs",
+    // Estimates, not game data: see data/source/boss-tempo.json
+    tempo: { note: tempo.note, shape: tempo.shape, spread: tempo.spread, classes: tempo.classes },
     notes: [
       "defense: flat defense per damage type, compared with attack power to scale damage down.",
       "negation: percent of damage removed per type after defense (negative = takes extra damage).",
       "status: buildup needed for the first proc, then each later proc; null = immune.",
       "statusDamage: share of normal Hemorrhage/Frostbite proc damage this boss takes.",
+      "tempo: the boss's tempo class, a key of meta.tempo.classes (an estimate of how much room it leaves to attack).",
     ],
   },
   bosses,
