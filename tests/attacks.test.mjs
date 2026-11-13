@@ -25,6 +25,7 @@ test("attack database is well-formed", () => {
     "R1 1", "R1 2", "R1 3", "R1 4", "R1 5", "R1 6", "R2 1", "R2 2", "Charged R2 1", "Charged R2 2",
     "Running R1", "Running R2", "Rolling R1", "Backstep R1", "Jumping R1", "Jumping R2", "Guard Counter",
   ]);
+  const pairedNames = new Set(["L1 1", "L1 2", "L1 3", "L1 4", "L1 5", "L1 6", "Running L1", "Rolling L1", "Backstep L1", "Jumping L1"]);
   const ours = new Set(weaponDb.weapons.map((w) => w.name));
   const frames = (v) => v === null || (Number.isInteger(v) && v > 0 && v < 200);
   assert.equal(Object.keys(attackDb.weapons).length, attackDb.meta.weaponCount);
@@ -36,12 +37,15 @@ test("attack database is well-formed", () => {
   let timed = 0;
   let total = 0;
   for (const moveset of attackDb.movesets) {
+    assert.ok(moveset["1h"] || moveset["2h"], "a one- or two-handed moveset");
     for (const [grip, list] of Object.entries(moveset)) {
-      assert.ok(grip === "1h" || grip === "2h");
+      assert.ok(grip === "1h" || grip === "2h" || grip === "paired");
+      const paired = grip === "paired";
       for (const entry of list) {
-        assert.equal(entry.length, 6, "[name, motion values, type, next, dodge, stamina]");
-        const [name, mvs, type, next, exit, stamina] = entry;
-        assert.ok(names.has(name), `known attack ${name}`);
+        assert.equal(entry.length, paired ? 7 : 6, "[name, motion values, type, next, dodge, stamina] and, in powerstance, hands");
+        const [name, mvs, type, next, exit, stamina, hands] = entry;
+        assert.ok((paired ? pairedNames : names).has(name), `known attack ${name}`);
+        if (paired) assert.ok(/^[LR]+$/.test(hands) && hands.length === mvs.length, `${name}: a hand per hit (${hands})`);
         assert.ok(mvs.length >= 1 && mvs.every((v) => v > 0 && v < 1000), `${name} motion values`);
         assert.ok(Engine.PHYSICAL_TYPES.includes(type), `${name} type ${type}`);
         assert.ok(frames(next) && frames(exit), `${name} frames ${next}, ${exit}`);

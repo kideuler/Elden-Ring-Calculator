@@ -2,7 +2,9 @@
 /**
  * Builds data/attacks.json: the basic moveset of every melee weapon, one- and two-handed (light
  * chain, heavies, charged heavies, running, rolling and backstep attacks, jump attacks and guard
- * counters), with each attack's motion values, physical damage type, timing and stamina cost.
+ * counters), with each attack's motion values, physical damage type, timing and stamina cost,
+ * and its powerstance attacks (L1 with a weapon of the same type in each hand), with the hand
+ * that deals each hit.
  *
  * Sources, both in data/source/:
  *
@@ -14,7 +16,9 @@
  *                      game-animation-library, trimmed to the attacks used here. It gives each
  *                      attack's physical damage type, its stamina cost and two frames (at 30
  *                      fps): the one from which the next attack can start ("attack" cancel) and
- *                      the one from which you can dodge ("dodge" cancel).
+ *                      the one from which you can dodge ("dodge" cancel). For powerstance
+ *                      attacks it also gives the hand of each hit, in order ("LR": left, then
+ *                      right), from the library's per-class hitbox files.
  *
  * Timing per attack (frames at 30 fps):
  *   R1, charged R2, running, rolling, backstep and guard counter: counted from the start of the
@@ -24,17 +28,24 @@
  *   Jump attacks: the landing's two frames. The time in the air isn't in the data either, so the
  *     calculator adds an estimate.
  *
- * Output: { meta, movesets: [{ "1h": [attack...], "2h": [attack...] }], weapons: { name: index } }
- * with attack = [name, [motion value per hit...], physical type, frames until the next attack,
- * frames until a dodge, stamina cost]; the last three are null where the frame data has no entry
- * for that weapon's animation.
+ * Output: { meta, movesets: [{ "1h": [attack...], "2h": [attack...], paired: [attack...] }],
+ * weapons: { name: index } } with attack = [name, [motion value per hit...], physical type,
+ * frames until the next attack, frames until a dodge, stamina cost]; the last three are null
+ * where the frame data has no entry for that weapon's animation. A powerstance attack ("L1 1",
+ * "Jumping L1", ...) has a seventh element, the hand of each hit ("LR").
+ *
+ * Hands: the hitbox files list a hit per behavior judge, and some swings have several (a blade's
+ * base and tip), so the list can be longer than the sheet's hits. It is then shortened by
+ * merging runs of one hand ("LLRR" → "LR"), and failing that, the sheet's hits alternate between
+ * the hands, starting with the first to swing.
  *
  * Usage:
  *   node scripts/build-attacks.mjs                       build from data/source/
- *   node scripts/build-attacks.mjs --import <frame-data.json> <motion-values.csv>
+ *   node scripts/build-attacks.mjs --import <frame-data.json> <motion-values.csv> <moves dir>
  *       first refresh data/source/ from fresh downloads: the full elden-ring.json from
- *       github.com/AtomechLLC/game-animation-library/tree/main/frame-data and the sheet's
- *       first tab exported as CSV
+ *       github.com/AtomechLLC/game-animation-library/tree/main/frame-data, the sheet's first tab
+ *       exported as CSV, and a folder with the library's per-class hitbox files
+ *       (frame-data/models/elden-ring/moves/<class>.json, e.g. curved-sword.json)
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -55,6 +66,9 @@ const ATTACKS = [
 ];
 const GRIPS = ["1h", "2h"];
 const MOVE_TYPES = new Set(["light", "heavy", "running", "rolling", "backstep", "jumping", "guard-counter"]);
+// Powerstance attacks: sheet columns "Paired <name>", frame data grip "Paired"
+const PAIRED_ATTACKS = ["L1 1", "L1 2", "L1 3", "L1 4", "L1 5", "L1 6", "Running L1", "Rolling L1", "Backstep L1", "Jumping L1"];
+const PAIRED_TYPES = new Set(["light", "running", "rolling", "backstep", "jumping"]);
 // Bows and crossbows deal their damage through ammunition, which this calculator doesn't model
 const RANGED_CLASSES = new Set(["Light Bow", "Bow", "Greatbow", "Crossbow", "Ballista"]);
 const PHYSICAL = new Set(["standard", "slash", "strike", "pierce"]);
@@ -103,6 +117,10 @@ function parseCsv(text) {
  */
 function parseMotionValues(cell) {
   if (!cell || !cell.trim()) return null;
+  // Parentheses that only group hits, as some powerstance cells do: "(40+40) + (100+100)"
+  if (/^[\s\d.+()]+$/.test(cell) && cell.replace(/\([\d.\s+]*\)/g, "").replace(/[\s+]/g, "") === "") {
+    return parseMotionValues(cell.replace(/[()]/g, ""));
+  }
   let text = cell;
   while (/\([^()]*\)/.test(text)) text = text.replace(/\([^()]*\)/g, "");
   const values = text
@@ -116,16 +134,49 @@ function parseMotionValues(cell) {
 
 // ---- import: trim fresh downloads into data/source/ -------------------------------------------
 
-function importSources(frameDataPath, csvPath) {
+/**
+ * The hand of each hit of every powerstance move, from the hitbox files: one hit per behavior
+ * judge, in order of its first frame, the right hand first when both start together ("?" where
+ * the file doesn't say).
+ */
+function readHands(movesDir, classIds) {
+  const hands = new Map();
+  for (const id of classIds) {
+    let file;
+    try {
+      file = JSON.parse(readFileSync(join(movesDir, `${id.toLowerCase().replace(/ /g, "-")}.json`), "utf8"));
+    } catch {
+      continue; // no file: the class has no powerstance moves
+    }
+    for (const [moveId, move] of Object.entries(file.moves || {})) {
+      const first = new Map();
+      for (const hit of move.hits || []) {
+        const hand = hit.hand === "L" || hit.hand === "R" ? hit.hand : "?";
+        const key = `${hand} ${hit.judge}`;
+        if (!first.has(key) || hit.start < first.get(key).start) first.set(key, { hand, start: hit.start });
+      }
+      if (!first.size) continue;
+      const order = [...first.values()].sort((a, b) => a.start - b.start || (a.hand === "R" ? -1 : b.hand === "R" ? 1 : 0));
+      hands.set(moveId, order.map((h) => h.hand).join(""));
+    }
+  }
+  return hands;
+}
+
+function importSources(frameDataPath, csvPath, movesDir) {
   const full = JSON.parse(readFileSync(frameDataPath, "utf8"));
   if (full.schema !== "frame-data/1" || full.game?.id !== "elden-ring") fail("not an Elden Ring frame-data/1 file");
   const classes = full.classes
     .filter((c) => !RANGED_CLASSES.has(c.id))
     .map((c) => ({ id: c.id, weapons: c.weapons }));
   const kept = new Set(classes.map((c) => c.id));
+  const hands = readHands(movesDir, [...kept]);
+  const keep = (m) =>
+    kept.has(m.class) &&
+    ((GRIPS.includes(m.grip) && MOVE_TYPES.has(m.type)) || (m.grip === "Paired" && PAIRED_TYPES.has(m.type)));
   const moves = full.moves
-    .filter((m) => kept.has(m.class) && GRIPS.includes(m.grip) && MOVE_TYPES.has(m.type))
-    .map((m) => ({ ...m, name: m.name.replace(/^(1h|2h) /, "") }))
+    .filter(keep)
+    .map((m) => ({ ...m, name: m.name.replace(/^(1h|2h|Paired) /, "") }))
     .filter((m) => !/Hangtime|Attack Landing|Feint/.test(m.name))
     .map((m) => ({
       class: m.class,
@@ -137,7 +188,11 @@ function importSources(frameDataPath, csvPath) {
       dodge: m.cancels?.dodge ?? null,
       stamina: m.damage?.stamina ?? null,
       weapons: m.weapons,
+      ...(m.grip === "Paired" ? { hands: hands.get(m.id) ?? null } : {}),
     }));
+  const pairedMoves = moves.filter((m) => m.grip === "Paired");
+  const withoutHands = pairedMoves.filter((m) => !m.hands).length;
+  if (!pairedMoves.length || withoutHands === pairedMoves.length) fail(`no powerstance moves with hands (hitbox files in ${movesDir})`);
   const trimmed = {
     game: { name: full.game.name, version: full.game.version, fps: full.game.fps },
     source: { name: full.source.name, url: full.source.url, retrieved: full.source.retrieved, note: full.source.note },
@@ -157,10 +212,29 @@ function importSources(frameDataPath, csvPath) {
   ];
   writeFileSync(FRAME_DATA, `${lines.join("\n")}\n`);
   writeFileSync(MOTION_VALUES, readFileSync(csvPath, "utf8"));
-  console.log(`Imported ${moves.length} moves of ${classes.length} classes and the motion value sheet into data/source/`);
+  console.log(
+    `Imported ${moves.length} moves of ${classes.length} classes (${pairedMoves.length} powerstance, ` +
+      `${withoutHands} of them without hands) and the motion value sheet into data/source/`,
+  );
 }
 
 // ---- build ------------------------------------------------------------------------------
+
+/**
+ * The hand of each of `count` hits, from the hitbox files' list (see the header): as listed,
+ * with runs of one hand merged, or alternating from the first hand to swing. A "?" takes the
+ * other hand from the hit before it.
+ */
+function handsFor(listed, count) {
+  let text = "";
+  for (const c of listed || "") text += c === "?" ? (text.at(-1) === "R" ? "L" : "R") : c;
+  if (text.length === count) return { hands: text, how: "exact" };
+  const merged = text.replace(/(.)\1+/g, "$1");
+  if (merged.length === count) return { hands: merged, how: "merged" };
+  const first = text[0] || "R";
+  const other = first === "R" ? "L" : "R";
+  return { hands: Array.from({ length: count }, (_, i) => (i % 2 ? other : first)).join(""), how: "alternated" };
+}
 
 function build() {
   const frames = JSON.parse(readFileSync(FRAME_DATA, "utf8"));
@@ -190,6 +264,7 @@ function build() {
   const skipped = [];
   let attackCount = 0;
   let fromFrameData = 0;
+  const handCounts = { exact: 0, merged: 0, alternated: 0 };
 
   for (const name of ourNames) {
     const at = where.get(name);
@@ -241,6 +316,24 @@ function build() {
       skipped.push(name);
       continue;
     }
+
+    // Powerstance attacks, timed like the one-handed ones, with the hand of each hit
+    const paired = [];
+    for (const attack of PAIRED_ATTACKS) {
+      const jump = attack.startsWith("Jumping");
+      const move = own.get(`Paired ${attack}`);
+      const landing = jump ? own.get(`Paired ${attack} Landing`) : null;
+      const mvs = col.has(`Paired ${attack}`) ? parseMotionValues(row[col.get(`Paired ${attack}`)]) : null;
+      if (!mvs || !move) continue;
+      const timed = jump ? landing : move;
+      const next = timed ? timed.attack ?? timed.dodge ?? null : null;
+      const exit = timed ? timed.dodge ?? timed.attack ?? null : null;
+      const type = PHYSICAL.has(move.type) ? move.type : (moveset["1h"] || moveset["2h"])[0][2];
+      const hands = handsFor(move.hands, mvs.length);
+      handCounts[hands.how]++;
+      paired.push([attack, mvs, type, next, exit, move.stamina ?? landing?.stamina ?? null, hands.hands]);
+    }
+    if (paired.length) moveset.paired = paired;
     const key = JSON.stringify(moveset);
     if (!movesetIndex.has(key)) {
       movesetIndex.set(key, movesets.length);
@@ -259,11 +352,19 @@ function build() {
   if (JSON.stringify(movesets[weapons["Serpentbone Blade"]]?.["1h"].find((a) => a[0] === "R2 1")?.[1]) !== "[50,110]") {
     fail("Serpentbone Blade's R2 should hit twice (50 + 110)");
   }
+  const scimitar = movesets[weapons.Scimitar]?.paired;
+  if (JSON.stringify(scimitar?.find((a) => a[0] === "L1 1")) !== JSON.stringify(["L1 1", [92, 92], "slash", 26, 28, 12, "LR"])) {
+    fail("the Scimitar's powerstance L1 1 should be two 92 hits, left then right");
+  }
+  const jump = scimitar?.find((a) => a[0] === "Jumping L1");
+  if (JSON.stringify([jump?.[1], jump?.[6]]) !== JSON.stringify([[50, 50, 105, 105], "RLRL"])) {
+    fail("the Scimitar's powerstance jump attack should hit 50 and 105 with each hand, the right first");
+  }
 
   const out = {
     meta: {
       description:
-        "Basic moveset of each melee weapon: [attack, [motion value per hit], physical damage type, frames at 30 fps until the next attack can start, frames until a dodge can start, stamina cost] (the last three null where the frame data has no entry)",
+        "Basic moveset of each melee weapon: [attack, [motion value per hit], physical damage type, frames at 30 fps until the next attack can start, frames until a dodge can start, stamina cost] (the last three null where the frame data has no entry). \"paired\" holds the powerstance attacks (L1 with a weapon of the same type in each hand), with a seventh element: the hand of each hit, R or L",
       motionValues: "Elden Ring Motion Values and Attack Data sheet (patch 1.16)",
       motionValuesUrl: "https://docs.google.com/spreadsheets/d/1j4bpTbsnp5Xsgw9TP2xv6d8R4qk0ErpE9r_5LGIDraU/edit#gid=0",
       frameData: `${frames.source.name}, patch ${frames.game.version}, via AtomechLLC game-animation-library`,
@@ -272,6 +373,7 @@ function build() {
       timingPatch: frames.game.version,
       weaponCount: Object.keys(weapons).length,
       movesetCount: movesets.length,
+      pairedWeaponCount: Object.values(weapons).filter((i) => movesets[i].paired).length,
     },
     movesets,
     weapons,
@@ -281,12 +383,13 @@ function build() {
   console.log(
     `Wrote ${relative(process.cwd(), OUT)}: ${out.meta.weaponCount} weapons, ${movesets.length} distinct movesets, ` +
       `${attackCount} attacks (${fromFrameData} motion values from the frame data where the sheet had none), ` +
+      `powerstance attacks for ${out.meta.pairedWeaponCount} (hands: ${handCounts.exact} as listed, ${handCounts.merged} merged, ${handCounts.alternated} alternated), ` +
       `${(Buffer.byteLength(json) / 1024).toFixed(0)} KB. No moveset for ${skipped.length}: ${skipped.join(", ")}`,
   );
 }
 
 if (process.argv[2] === "--import") {
-  if (process.argv.length < 5) fail("usage: --import <frame-data.json> <motion-values.csv>");
-  importSources(process.argv[3], process.argv[4]);
+  if (process.argv.length < 6) fail("usage: --import <frame-data.json> <motion-values.csv> <moves dir>");
+  importSources(process.argv[3], process.argv[4], process.argv[5]);
 }
 build();

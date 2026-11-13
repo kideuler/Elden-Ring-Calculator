@@ -306,6 +306,19 @@ test("rankInfusions: each infusion in its faster grip, with its best grease", ()
     if (row.grease) assert.ok(row.grease.sim.dps > row.sim.dps, `${row.grease.name} helps`);
   }
   near(first, 1, 1e-9, "each fight has one fastest infusion");
+  // Infusions that kill at the same moment share the fight, whatever their order
+  let tied = 0;
+  const shares = ranked.rows.map(() => 0);
+  for (let f = 0; f < options.count; f++) {
+    const best = Math.min(...ranked.rows.map((r) => r.sim.times[f]));
+    const fastest = ranked.rows.filter((r) => r.sim.times[f] === best);
+    if (fastest.length > 1) tied++;
+    ranked.rows.forEach((r, i) => {
+      if (r.sim.times[f] === best) shares[i] += 1 / (fastest.length * options.count);
+    });
+  }
+  assert.ok(tied > 0, "some fights end at the same moment for several infusions");
+  ranked.rows.forEach((r, i) => near(r.fastest, shares[i], 1e-12, `${r.infusion.name}'s share`));
   // Fire grease adds the most against a boss that negates fire least (0% against 40% for the rest)
   assert.ok(["magic", "lightning", "holy"].every((t) => boss.negation.fire < boss.negation[t]));
   assert.ok(ranked.rows.filter((r) => r.grease).every((r) => r.grease.name === "Fire Grease"));

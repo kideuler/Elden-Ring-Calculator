@@ -27,7 +27,8 @@
  *
  * Against a boss (hitDamage below), each damage type of a hit is reduced separately:
  *
- *   attack  = AR(type) x motion value x attack multipliers (talismans)
+ *   attack  = AR(type) x motion value x attack multipliers (talismans, and Scadutree Blessing
+ *             against a Shadow of the Erdtree boss)
  *   dealt   = attack x defenseMultiplier(attack / boss defense) x (1 - boss negation)
  *
  * The defense multiplier climbs from 10% to 90% of attack as attack outgrows defense, which is
@@ -284,6 +285,24 @@
   const DAMAGING_STATUS = ["bleed", "frost", "poison", "rot"];
 
   /**
+   * Scadutree Blessing: in the Land of Shadow each level multiplies your attack, from x1.10 at
+   * level 1 to x2.05 at 20 (the values since patch 1.12.2, from the wiki's table). It has no
+   * effect outside the realm of shadow, so only Shadow of the Erdtree bosses (`dlc`) count it.
+   * It raises the attack of every damage type before defense, as an attack talisman does. The
+   * wiki lists only damage dealt and taken, so status buildup and proc damage (a share of the
+   * boss's HP) are taken not to change with it.
+   */
+  const BLESSING_ATTACK = [1, 1.1, 1.2, 1.25, 1.3, 1.35, 1.42, 1.5, 1.55, 1.6, 1.65, 1.75, 1.85, 1.87, 1.9, 1.92, 1.95, 1.97, 2, 2.02, 2.05];
+  const MAX_BLESSING = BLESSING_ATTACK.length - 1;
+
+  /** The attack multiplier of a Scadutree Blessing level against a boss: 1 outside the DLC. */
+  function blessingMultiplier(level, boss) {
+    if (!boss || !boss.dlc) return 1;
+    const n = Math.floor(Number(level));
+    return Number.isFinite(n) ? BLESSING_ATTACK[Math.max(0, Math.min(MAX_BLESSING, n))] : 1;
+  }
+
+  /**
    * Share of an attack that gets through defense, from the ratio of attack to defense:
    * 10% at 1/8 of defense or less, 40% at equal values, 70% at 2.5x and 90% at 8x or more,
    * joined by quadratic curves.
@@ -351,24 +370,28 @@
    * points: what one landed attack adds to the successive-attack talismans (see SUCCESSIVE)
    */
   const ATTACK_FAMILIES = [
-    { id: "r1", label: "R1", kind: "light", points: 8, pattern: /^R1 \d$/ },
+    { id: "r1", label: "R1", kind: "light", points: 8, pattern: /^R1 \d$/, chain: true },
     { id: "r2", label: "R2", kind: "heavy", points: 10, pattern: /^R2 \d$/, windup: true },
     { id: "charged-r2", label: "Charged R2", kind: "charged", points: 14, pattern: /^Charged R2 \d$/ },
     { id: "jump-r1", label: "Jump R1", kind: "jump", points: 8, pattern: /^Jumping R1$/, airtime: true },
     { id: "jump-r2", label: "Jump R2", kind: "jump", points: 10, pattern: /^Jumping R2$/, airtime: true },
+    // Powerstance: L1 with a weapon of the same type in each hand (data/attacks.json "paired")
+    { id: "l1", label: "L1", kind: "light", points: 8, pattern: /^L1 \d$/, chain: true },
+    { id: "jump-l1", label: "Jump L1", kind: "jump", points: 8, pattern: /^Jumping L1$/, airtime: true },
   ];
 
   /** Attacks that need a sprint, roll, backstep or block first, so the model doesn't plan them. */
-  const SITUATIONAL_ATTACKS = ["Running R1", "Running R2", "Rolling R1", "Backstep R1", "Guard Counter"];
+  const SITUATIONAL_ATTACKS = ["Running R1", "Running R2", "Rolling R1", "Backstep R1", "Guard Counter", "Running L1", "Rolling L1", "Backstep L1"];
 
   /**
    * The attack families in one grip of a moveset, with their timing in seconds.
    * @param attacks  [[name, [motion value per hit], physical type, frames until the next attack
-   *                 can start, frames until a dodge can start, stamina cost], ...] as in
-   *                 data/attacks.json (the last three may be null)
+   *                 can start, frames until a dodge can start, stamina cost, hands], ...] as in
+   *                 data/attacks.json (the frames and cost may be null; hands, the hand of each
+   *                 hit as "R" or "L", is there for powerstance attacks only)
    * @returns [{ id, label, kind, points, estimated, steps: [{ name, mvs, type, chain, exit,
-   *            stamina, finisher, frames, exitFrames }] }]. A family with an attack the animation
-   *            data doesn't cover is left out, since it can't be timed.
+   *            stamina, finisher, frames, exitFrames, hands }] }]. A family with an attack the
+   *            animation data doesn't cover is left out, since it can't be timed.
    */
   function attackFamilies(attacks) {
     const families = [];
@@ -376,7 +399,7 @@
       const list = (attacks || []).filter((a) => def.pattern.test(a[0]));
       if (!list.length || list.some((a) => a[3] == null || a[4] == null)) continue;
       const extra = (def.windup ? TIMING.windup : 0) + (def.airtime ? TIMING.airtime : 0);
-      const steps = list.map(([name, mvs, type, next, exit, stamina], i) => ({
+      const steps = list.map(([name, mvs, type, next, exit, stamina, hands], i) => ({
         name,
         mvs,
         type,
@@ -387,13 +410,32 @@
         exit: exit / FPS + extra,
         stamina: stamina || 0,
         // The last light attack of a chain, which the Twinblade Talisman strengthens
-        finisher: def.id === "r1" && list.length > 1 && i === list.length - 1,
+        finisher: !!def.chain && list.length > 1 && i === list.length - 1,
         frames: next,
         exitFrames: exit,
+        hands: hands || null,
       }));
       families.push({ id: def.id, label: def.label, kind: def.kind, points: def.points, estimated: extra > 0, steps });
     }
     return families;
+  }
+
+  /**
+   * A right-hand weapon's powerstance attacks with the left weapon's motion values on the left
+   * hand's hits: each hand swings with its own weapon's values. The timing and the hands come from
+   * the right hand's animations; where the left weapon's attack has a different number of hits,
+   * the right hand's values stand for both.
+   */
+  function pairedAttacks(right, left) {
+    if (!right) return null;
+    if (!left || left === right) return right;
+    const byName = new Map(left.map((a) => [a[0], a]));
+    return right.map((a) => {
+      const other = byName.get(a[0]);
+      if (!other || other[1].length !== a[1].length || !a[6]) return a;
+      const mvs = a[1].map((mv, h) => (a[6][h] === "L" ? other[1][h] : mv));
+      return [a[0], mvs, ...a.slice(2)];
+    });
   }
 
   /** A stand-in for weapons without moveset data: one 100 motion value hit a second. */
@@ -599,20 +641,34 @@
    * frame where the next can start, the last has reached the frame where you can dodge, and the
    * string's stamina cost stays below your stamina (so there is some left to dodge with).
    *
-   * @param options { result: calculate() output, boss, families: attackFamilies() output,
-   *                  grip: "1h" | "2h", stamina (default: unlimited), effects: talismanEffects()
-   *                  output, bonus: flat attack added per damage type (a grease), tempo: the
-   *                  boss's tempo (used to value frostbite when choosing attacks) }
+   * Powerstance attacks hit with both hands. Each hit of a step with `hands` uses its own hand's
+   * weapon: its attack rating for the damage and its buildup for status effects.
+   *
+   * @param options { result: calculate() output (the right hand), boss, families:
+   *                  attackFamilies() output, grip: "1h" | "2h" | "ps" (powerstance), stamina
+   *                  (default: unlimited), effects: talismanEffects() output, bonus: flat attack
+   *                  added per damage type (a grease), tempo: the boss's tempo (used to value
+   *                  frostbite when choosing attacks), left: calculate() output of the left
+   *                  hand's weapon (default: the same weapon, as a paired weapon holds one in
+   *                  each hand), leftBonus: the left hand's grease (default: none for a left
+   *                  weapon of its own, the same as `bonus` otherwise), blessing: Scadutree
+   *                  Blessing level, which multiplies every hit's attack against a DLC boss (see
+   *                  blessingMultiplier) }
    */
   function prepareFighter(options) {
     const { result, boss } = options;
     const effects = options.effects || talismanEffects([]);
-    const twoHanded = options.grip === "2h";
+    const grip = options.grip === "2h" || options.grip === "ps" ? options.grip : "1h";
     const stamina = options.stamina ?? Infinity;
     const bonus = options.bonus || {};
+    const left = options.left || result;
+    const leftBonus = options.left ? options.leftBonus || {} : options.leftBonus || bonus;
 
-    const ar = DAMAGE_TYPES.map((t) => ((result.damage[t] && result.damage[t].total) || 0) + (bonus[t] || 0));
-    const typeMultiplier = DAMAGE_TYPES.map((t) => effects.damage[t] || 1);
+    const arOf = (r, b) => DAMAGE_TYPES.map((t) => ((r.damage[t] && r.damage[t].total) || 0) + (b[t] || 0));
+    const ar = arOf(result, bonus);
+    const arLeft = arOf(left, leftBonus);
+    const blessing = blessingMultiplier(options.blessing, boss);
+    const typeMultiplier = DAMAGE_TYPES.map((t) => (effects.damage[t] || 1) * blessing);
     const defense = DAMAGE_TYPES.map((t) => boss.defense[t]);
 
     // Effects that switch on and off during a fight: the successive-attack tier (0-3) and one
@@ -632,13 +688,15 @@
       stateMultiplier[state] = m;
     }
 
-    const fighter = { boss, result, grip: twoHanded ? "2h" : "1h", stamina, effects, tiers, after, stateCount, stateMultiplier, defense };
+    const fighter = { boss, result, left, grip, stamina, effects, tiers, after, stateCount, stateMultiplier, defense };
 
     const families = [];
     for (const family of options.families || []) {
       const steps = family.steps.map((step) => {
         const multiplier = attackMultiplier(effects, fighter.grip, family, step);
-        const hits = step.mvs.map((mv) => ar.map((a, i) => (a * mv * multiplier * typeMultiplier[i]) / 100));
+        // hand[h]: 0 the right hand, 1 the left
+        const hand = Uint8Array.from(step.mvs, (_, h) => (step.hands && step.hands[h] === "L" ? 1 : 0));
+        const hits = step.mvs.map((mv, h) => (hand[h] ? arLeft : ar).map((a, i) => (a * mv * multiplier * typeMultiplier[i]) / 100));
         return {
           source: step,
           chain: step.chain,
@@ -646,15 +704,18 @@
           stamina: step.stamina,
           negation: DAMAGE_TYPES.map((t) => boss.negation[t === "physical" ? step.type : t] / 100),
           hits,
+          hand,
           cache: new Float64Array(hits.length * stateCount).fill(NaN), // damage per hit and state
           uses: new Float64Array(hits.length * stateCount), // filled by simulate()
         };
       });
 
-      // time[n], value[n] and hitsUpTo[n] describe the string of the family's first n attacks
+      // time[n], value[n] and hitsUpTo[n] describe the string of the family's first n attacks;
+      // leftHits[n] counts the left hand's hits among them
       const time = [0];
       const value = [0];
       const hitsUpTo = [0];
+      const leftHits = [0];
       const costs = [0];
       const hitTimes = [];
       let start = 0;
@@ -666,10 +727,15 @@
         const total = start + step.exit;
         if (total > MAX_OPENING) break;
         let v = value[n - 1];
-        for (let h = 0; h < step.hits.length; h++) v += hitTotal(fighter, step, h, 0);
+        let l = leftHits[n - 1];
+        for (let h = 0; h < step.hits.length; h++) {
+          v += hitTotal(fighter, step, h, 0);
+          l += step.hand[h];
+        }
         time.push(total);
         value.push(v);
         hitsUpTo.push(hitsUpTo[n - 1] + step.hits.length);
+        leftHits.push(l);
         costs.push(cost);
         hitTimes.push(start + Math.min(step.chain, step.exit));
         start += step.chain;
@@ -684,16 +750,19 @@
         while (n < maxPrefix && time[n + 1] * FPS <= frames + 1e-6) n++;
         fit[frames] = n;
       }
-      families.push({ id: family.id, label: family.label, kind: family.kind, points: family.points, source: family, steps, time, value, hitsUpTo, costs, hitTimes, maxPrefix, fit });
+      families.push({ id: family.id, label: family.label, kind: family.kind, points: family.points, source: family, steps, time, value, hitsUpTo, leftHits, costs, hitTimes, maxPrefix, fit });
     }
 
-    // Status effects the weapon builds up on this boss
+    // Status effects either hand builds up on this boss: perHit[hand] is what one hit of that
+    // hand adds to the meter
     const statusDamage = boss.statusDamage ?? 1;
     const building = [];
     const immune = [];
+    const twoWeapons = left !== result && families.some((f) => f.leftHits[f.maxPrefix] > 0);
     for (const type of STATUS_TYPES) {
-      const s = result.status[type];
-      if (!s || !(s.total > 0)) continue;
+      const buildup = (r) => (r.status[type] && r.status[type].total > 0 ? r.status[type].total : 0);
+      const perHit = [buildup(result), twoWeapons ? buildup(left) : buildup(result)];
+      if (!(perHit[0] > 0 || perHit[1] > 0)) continue;
       const thresholds = boss.status[type];
       if (!Array.isArray(thresholds)) {
         if (type !== "blight") immune.push(type);
@@ -707,7 +776,7 @@
       // kind: 1 damage at once (bleed), 2 damage at once plus frostbite, 3 damage over time,
       // 0 no damage (sleep, madness). worth: the damage one proc is good for, used to weigh
       // buildup against direct damage when choosing attacks.
-      const entry = { type, perHit: s.total, thresholds, afterMask, kind: 0, damage: 0, perSecond: 0, seconds: 0, worth: 0 };
+      const entry = { type, perHit, thresholds, afterMask, kind: 0, damage: 0, perSecond: 0, seconds: 0, worth: 0 };
       if (type === "bleed" || type === "frost") {
         entry.kind = type === "bleed" ? 1 : 2;
         entry.damage = (effect.hpShare * boss.hp + effect.flat) * statusDamage;
@@ -733,7 +802,8 @@
     fighter.families = families;
     fighter.building = building;
     fighter.immune = immune;
-    fighter.fire = ar[DAMAGE_TYPES.indexOf("fire")] > 0;
+    // Whether each hand's hits carry fire, which ends frostbite
+    fighter.fire = Uint8Array.of(ar[DAMAGE_TYPES.indexOf("fire")] > 0 ? 1 : 0, arLeft[DAMAGE_TYPES.indexOf("fire")] > 0 ? 1 : 0);
     fighter.canHurt = families.some((f) => f.value[1] > 0) || (families.length > 0 && building.some((b) => b.kind > 0));
     return fighter;
   }
@@ -763,9 +833,10 @@
    * still needs. Hits land one by one:
    *
    * - A hit deals hitTotal() in the current talisman state, times 1.2 during frostbite.
-   * - Every hit adds the weapon's full status buildup. When a meter reaches the boss's
-   *   resistance the status procs, the meter empties, and the next proc needs the next (higher)
-   *   threshold of boss.status[type]; past the end of that list, its last value.
+   * - Every hit adds its weapon's full status buildup (in powerstance, the weapon in the hand
+   *   that lands it). When a meter reaches the boss's resistance the status procs, the meter
+   *   empties, and the next proc needs the next (higher) threshold of boss.status[type]; past
+   *   the end of that list, its last value.
    *   Bleed: 15% of max HP + 100 at once. Frost: 10% + 30 at once, then frostbite for 30
    *   seconds. Poison and rot: damage every second for 90 seconds. Bosses take statusDamage of
    *   the bleed and frost amounts. Frost, poison and rot can't build up while active, and a hit
@@ -796,6 +867,7 @@
     const openings = new Float64Array(N).fill(Infinity);
     const sources = { direct: 0, bleed: 0, frost: 0, poison: 0, rot: 0 };
     const procTotal = new Float64Array(B);
+    const fire = fighter.fire;
     const picks = families.map((family) => new Float64Array(family.maxPrefix + 1));
     const stateHits = new Float64Array(stateCount);
     for (const family of families) for (const step of family.steps) step.uses.fill(0);
@@ -807,7 +879,8 @@
     const meter = new Float64Array(B);
     const procCount = new Int32Array(B);
     const locked = new Float64Array(B); // the time until which a status can't build up
-    const price = new Float64Array(B);
+    const price = new Float64Array(B); // what a right-hand hit's buildup is worth
+    const priceLeft = new Float64Array(B); // and a left-hand hit's
     const dotRate = new Float64Array(B);
     const dotUntil = new Float64Array(B);
     const dotPart = new Float64Array(B);
@@ -874,11 +947,13 @@
         const frames = opens[j];
         entered++;
 
-        // What one hit's buildup is worth right now
+        // What one hit's buildup is worth right now, by hand
         for (let b = 0; b < B; b++) {
           const s = building[b];
           const k = procCount[b];
-          price[b] = locked[b] > start ? 0 : (s.worth * s.perHit) / s.thresholds[k < s.thresholds.length ? k : s.thresholds.length - 1];
+          const each = locked[b] > start ? 0 : s.worth / s.thresholds[k < s.thresholds.length ? k : s.thresholds.length - 1];
+          price[b] = each * s.perHit[0];
+          priceLeft[b] = each * s.perHit[1];
         }
         let best = -1;
         let bestCount = 0;
@@ -888,7 +963,9 @@
           const n = family.fit[frames];
           if (!n) continue;
           let v = family.value[n];
-          for (let b = 0; b < B; b++) v += price[b] * family.hitsUpTo[n];
+          const l = family.leftHits[n];
+          const r = family.hitsUpTo[n] - l;
+          for (let b = 0; b < B; b++) v += price[b] * r + priceLeft[b] * l;
           if (v > bestValue) {
             bestValue = v;
             best = i;
@@ -923,6 +1000,7 @@
             const state = tier + tiers * bits;
 
             for (let h = 0; h < step.hits.length; h++) {
+              const hand = step.hand[h];
               const frozen = at < frostUntil;
               const amp = frozen ? FROST_AMP : 1;
               const dealt = hitTotal(fighter, step, h, state) * amp;
@@ -932,7 +1010,7 @@
               sources.direct += dealt < remaining ? dealt : remaining;
               remaining -= dealt;
               // Fire thaws frostbite, which also lets frost build up again
-              if (frozen && fighter.fire) {
+              if (frozen && fire[hand]) {
                 frostUntil = at;
                 if (frostIndex >= 0) locked[frostIndex] = at;
               }
@@ -940,8 +1018,10 @@
               for (let b = 0; b < B && remaining > 0; b++) {
                 if (locked[b] > at) continue;
                 const s = building[b];
+                const add = s.perHit[hand];
+                if (!add) continue;
                 const k = procCount[b];
-                meter[b] += s.perHit;
+                meter[b] += add;
                 if (meter[b] < s.thresholds[k < s.thresholds.length ? k : s.thresholds.length - 1]) continue;
                 meter[b] = 0;
                 procCount[b] = k + 1;
@@ -1078,20 +1158,37 @@
   }
 
   /**
-   * The attack families a weapon fights with in each grip it can be held in (paired weapons have
-   * no two-handed stance; bows are always held in two hands). A weapon without moveset data gets
-   * one basic hit a second in each grip, and `generic` is true.
+   * The attack families a weapon fights with in each way it can be held:
+   *   "1h": in the right hand.
+   *   "2h": in both hands (bows only this way). A paired weapon held in both hands swings both of
+   *         its pair: its two-handed moveset, and its powerstance attacks with the same weapon in
+   *         each hand. It gets no two-handing Strength bonus (see getsTwoHandBonus).
+   *   "ps": powerstance, when `leftMoveset` (the moveset of a weapon of the same type for the left
+   *         hand) is given and the weapon has powerstance data: its one-handed attacks plus L1
+   *         with both weapons (see pairedAttacks).
+   * A weapon without moveset data gets one basic hit a second in each grip, `generic` is true,
+   * and it has no powerstance.
    */
-  function weaponFamilies(weapon, moveset, physicalType) {
-    const grips = weapon.paired ? ["1h"] : getsTwoHandBonus(weapon, false) ? ["2h"] : ["1h", "2h"];
+  function weaponFamilies(weapon, moveset, physicalType, leftMoveset) {
+    const grips = getsTwoHandBonus(weapon, false) ? ["2h"] : ["1h", "2h"];
     const families = {};
     for (const grip of grips) {
-      const list = moveset ? attackFamilies(moveset[grip]) : [];
+      let list = moveset ? attackFamilies(moveset[grip]) : [];
+      if (grip === "2h" && weapon.paired && list.length && moveset.paired) list = list.concat(attackFamilies(moveset.paired));
       if (list.length) families[grip] = list;
     }
     const generic = Object.keys(families).length === 0;
     if (generic) for (const grip of grips) families[grip] = basicFamily(physicalType);
+    else if (leftMoveset && moveset.paired && families["1h"]) {
+      const paired = attackFamilies(pairedAttacks(moveset.paired, leftMoveset.paired));
+      if (paired.length) families.ps = attackFamilies(moveset["1h"]).concat(paired);
+    }
     return { families, generic };
+  }
+
+  /** Whether a weapon can powerstance: one-handed and powerstance attacks in its moveset. */
+  function canPowerstance(weapon, moveset) {
+    return !!(moveset && moveset.paired && moveset["1h"] && !getsTwoHandBonus(weapon, false)) && attackFamilies(moveset.paired).length > 0;
   }
 
   /**
@@ -1109,22 +1206,32 @@
   }
 
   /**
-   * Every infusion of a weapon against a boss, each in the grip that kills faster.
+   * Every infusion of a weapon against a boss, each in the grip that kills faster: one-handed,
+   * two-handed or, with a left-hand weapon, powerstanced.
    *
    * @param options {
    *   stats:     { str, dex, int, fai, arc, end } as the status screen shows them
    *   level:     upgrade level
    *   boss:      an entry of the boss database
    *   tempo:     the boss's tempo, { opening, gap, shape, spread } (see createFights)
-   *   moveset:   { "1h": attacks, "2h": attacks } from data/attacks.json, or null for a weapon
-   *              without moveset data (it gets one basic hit a second)
+   *   moveset:   { "1h": attacks, "2h": attacks, paired: attacks } from data/attacks.json, or
+   *              null for a weapon without moveset data (it gets one basic hit a second)
    *   physicalType: the damage type of that basic hit
    *   talismans: entries of data/talismans.json
-   *   greases:   also fight the four physical infusions with their best grease (default true)
+   *   blessing:  Scadutree Blessing level (0-20); it counts only against a DLC boss
+   *   greases:   also fight the four physical infusions with their best grease (default true).
+   *              In powerstance the grease is on the right-hand weapon only.
+   *   left:      { weapon, level, moveset }: a weapon of the same type for the left hand. Each
+   *              infusion then also fights in powerstance ("ps"), with the left weapon in the
+   *              infusion that kills fastest alongside it: every infusion of it over the first
+   *              `leftScreen` fights (default 24), then the closest two over all of them.
    *   count, seed, fights: how many fights to draw and from which seed, or a ready fights object }
-   * @returns { effects, stats: with talisman points, stamina, fights, generic, grips,
-   *            rows: [{ infusion, grip, result, sim, grips: { "1h": { result, sim }, "2h": ... },
-   *                     fastest: share of fights in which this infusion kills first,
+   * @returns { effects, stats: with talisman points, stamina, fights, generic, grips, left,
+   *            rows: [{ infusion, grip, result, sim, grips: { "1h": { result, sim }, "2h": ...,
+   *                     "ps": { result, sim, left } }, left: in powerstance { weapon, infusion,
+   *                     result } of the left hand, else null,
+   *                     fastest: share of fights in which this infusion kills first (those
+   *                     that kill at the same moment share the fight),
    *                     grease: { name, type, attack, sim } or null }] in the weapon's order }
    */
   function rankInfusions(model, weapon, options) {
@@ -1136,34 +1243,73 @@
 
   /**
    * rankInfusions in steps, for a caller that spreads the work out: a generator that yields
-   * between one infusion and the next and returns what rankInfusions returns.
+   * between one infusion and the next, and within an infusion before each longer part: its
+   * powerstance fights, the closest left infusions over every fight, and its grease fight. It
+   * returns what rankInfusions returns, and yields how many infusions are done.
    */
   function* rankInfusionsInSteps(model, weapon, options) {
-    const { boss, tempo } = options;
+    const { boss, tempo, blessing } = options;
     const effects = talismanEffects(options.talismans);
     const stats = boostedStats(options.stats, effects);
     const stamina = staminaFor(stats.end, effects.stamina);
     const fights = options.fights || createFights(tempo, { count: options.count, seed: options.seed });
-    const { families, generic } = weaponFamilies(weapon, options.moveset, options.physicalType);
+    const left = options.left && options.left.weapon ? options.left : null;
+    const { families, generic } = weaponFamilies(weapon, options.moveset, options.physicalType, left && left.moveset);
+
+    // The left weapon in each of its infusions, held in one hand
+    const lefts = families.ps
+      ? left.weapon.infusions.map((infusion) => ({ infusion, result: calculate(model, left.weapon, infusion, { stats, level: left.level, twoHanded: false }) }))
+      : null;
+    const leftScreen = { ...fights, count: Math.min(fights.count, Math.max(1, Math.floor(options.leftScreen ?? 24))) };
 
     const rows = [];
     for (const infusion of weapon.infusions) {
       if (rows.length) yield rows.length;
-      const row = { infusion, grips: {}, grip: null, result: null, sim: null, fastest: 0, grease: null };
+      const row = { infusion, grips: {}, grip: null, result: null, sim: null, left: null, fastest: 0, grease: null };
       for (const grip of Object.keys(families)) {
+        if (grip === "ps") continue;
         const result = calculate(model, weapon, infusion, { stats, level: options.level, twoHanded: grip === "2h" });
-        const fighter = prepareFighter({ result, boss, families: families[grip], grip, stamina, effects, tempo });
+        const fighter = prepareFighter({ result, boss, families: families[grip], grip, stamina, effects, tempo, blessing });
         const sim = simulate(fighter, fights);
         row.grips[grip] = { result, sim };
         if (!row.sim || sim.seconds < row.sim.seconds) Object.assign(row, { grip, result, sim });
       }
 
+      if (lefts) {
+        // Powerstance takes longer than the rest, so a caller gets a break before it as well
+        yield rows.length;
+        const result = row.grips["1h"].result;
+        const pair = (l, set) =>
+          simulate(prepareFighter({ result, left: l.result, boss, families: families.ps, grip: "ps", stamina, effects, tempo, blessing }), set);
+        // Every infusion of the left weapon over the first fights, the closest two over all
+        let picks = lefts;
+        if (lefts.length > 2 && leftScreen.count < fights.count) {
+          picks = lefts
+            .map((l, i) => ({ l, i, seconds: pair(l, leftScreen).seconds }))
+            .sort((a, b) => a.seconds - b.seconds || b.l.result.total - a.l.result.total || a.i - b.i)
+            .slice(0, 2)
+            .map((x) => x.l);
+          yield rows.length;
+        }
+        let best = null;
+        for (const l of picks) {
+          const sim = pair(l, fights);
+          if (!best || sim.seconds < best.sim.seconds || (sim.seconds === best.sim.seconds && l.result.total > best.l.result.total)) best = { l, sim };
+        }
+        const leftHand = { weapon: left.weapon, infusion: best.l.infusion, result: best.l.result };
+        row.grips.ps = { result, sim: best.sim, left: leftHand };
+        if (!row.sim || best.sim.seconds < row.sim.seconds) Object.assign(row, { grip: "ps", result, sim: best.sim, left: leftHand });
+      }
+
       if (options.greases !== false && weapon.infusable && BUFFABLE_AFFINITIES.has(infusion.affinity)) {
-        // The grease that adds the most to a plain 100 motion value hit
-        const added = (g) => g.attack * defenseMultiplier(g.attack, boss.defense[g.type]) * (1 - boss.negation[g.type] / 100);
+        yield rows.length;
+        // The grease that adds the most to a plain 100 motion value hit, on the right-hand weapon
+        const m = blessingMultiplier(blessing, boss);
+        const added = (g) => g.attack * m * defenseMultiplier(g.attack * m, boss.defense[g.type]) * (1 - boss.negation[g.type] / 100);
         const grease = GREASES.reduce((a, b) => (added(b) > added(a) ? b : a));
         const fighter = prepareFighter({
           result: row.result,
+          left: row.left ? row.left.result : undefined,
           boss,
           families: families[row.grip],
           grip: row.grip,
@@ -1171,56 +1317,81 @@
           effects,
           tempo,
           bonus: { [grease.type]: grease.attack },
+          blessing,
         });
         row.grease = { ...grease, sim: simulate(fighter, fights) };
       }
       rows.push(row);
     }
 
-    // In how many fights is each infusion the first to kill?
+    // In how many fights is each infusion the first to kill? A kill lands on a hit, so infusions
+    // often kill on the same hit of the same opening: those share the fight
     for (let f = 0; f < fights.count; f++) {
-      let best = -1;
-      for (let i = 0; i < rows.length; i++) {
-        if (rows[i].sim.times[f] < (best < 0 ? Infinity : rows[best].sim.times[f])) best = i;
-      }
-      if (best >= 0) rows[best].fastest += 1 / fights.count;
+      let best = Infinity;
+      for (const row of rows) if (row.sim.times[f] < best) best = row.sim.times[f];
+      if (!Number.isFinite(best)) continue;
+      const tied = rows.filter((row) => row.sim.times[f] === best);
+      for (const row of tied) row.fastest += 1 / (tied.length * fights.count);
     }
 
-    return { effects, stats, stamina, fights, generic, grips: Object.keys(families), families, rows };
+    return { effects, stats, stamina, fights, generic, grips: Object.keys(families), families, left: lefts ? left : null, rows };
   }
 
   /**
-   * The weapons that kill a boss fastest, each in its best infusion and grip.
+   * The weapons that kill a boss fastest, each in its best infusion and grip, or powerstanced
+   * with the best partner of its type in the left hand.
    *
-   * Fighting every infusion of every weapon over all the fights takes tens of seconds, so the
-   * search goes in two stages over the same fights. First each weapon is fought over the first
-   * few of them (`screen`, default 24) without greases, which is enough to tell the contenders
-   * from the rest. Then the closest (`shortlist`, default 30) are fought over all of them exactly
-   * as rankInfusions fights one weapon, and the fastest `top` (default 10) are returned.
+   * Fighting every infusion of every weapon over all the fights takes tens of seconds, and every
+   * pair far longer, so the search goes in stages over the same fights:
+   *   1. Screen: each weapon over the first few fights (`screen`, default 24), in every infusion
+   *      and grip, without greases. That is enough to tell the contenders from the rest.
+   *   2. Pairs, within each weapon type that can powerstance, over the same fights. Every
+   *      one-handed infusion of the screen is a hand (weapon and infusion). First the most
+   *      promising hands are paired every way round, a weapon with itself too (two of it): the
+   *      `hands` (default 5) fastest one-handed, the `hands` whose single hit is worth most
+   *      against this boss (damage, plus status buildup valued at what a proc deals), and the
+   *      one worth most for each status effect. The `partnerHands` (default 3) that made the
+   *      best pairs as the left hand then partner every other hand of the type as the right.
+   *   3. Final: the closest (`shortlist`, default 30), each at its best alone or as the right
+   *      hand of a pair, are fought over all the fights exactly as rankInfusions fights them:
+   *      alone, or with the weapon of each of their `partners` (default 1) best pairs in the left
+   *      hand (which fights them alone too, and finds both hands' infusions afresh). So a result
+   *      shows what the calculator shows for the same weapons. The fastest `top` (default 10)
+   *      are returned, each weapon once, as the right hand.
    * Weapons without moveset data (staffs, seals, bows and the like) are left out: their one
    * basic hit a second is a stand-in, not a moveset that can be compared.
    *
    * A generator, so a page can spread the work over several frames: it yields { stage, done,
-   * total } after each weapon of the screen (stage "screen"), then in the final stage (stage
-   * "final") between one infusion and the next as well, since a weapon fought over every fight
-   * can take half a second against a boss with a lot of HP. `done` counts finished weapons.
+   * total } after each weapon of the screen (stage "screen"), after each pair (stage "pairs"),
+   * then in the final stage (stage "final") between one infusion and the next as well, since a
+   * weapon fought over every fight can take half a second against a boss with a lot of HP.
+   * `done` counts finished weapons or pairs.
    *
    * @param candidates [{ weapon, level, moveset, physicalType }], as rankInfusions takes them
-   * @param options    { stats, boss, tempo, talismans, fights (the full set), screen, shortlist, top }
+   * @param options    { stats, boss, tempo, talismans, blessing, fights (the full set), screen,
+   *                     hands (0 for no pairs), partnerHands, partners, shortlist, top }
    * @returns { searched: how many weapons were fought, skipped: the weapons without moveset data,
-   *            screen: the fights every weapon met, shortlist: how many were fought over all of them,
-   *            results: [{ weapon, level, fight: rankInfusions output, best: its fastest row }],
-   *            fastest first, only weapons that can kill the boss }
+   *            screen: the fights every weapon met, pairs: how many pairs were fought,
+   *            shortlist: how many weapons were fought over all of them,
+   *            results: [{ weapon, level, fight: rankInfusions output (with `left` set when it
+   *            fought a left hand), best: its fastest row, alone or in powerstance (then best.grip
+   *            is "ps" and best.left the left hand's { weapon, infusion, result }) }], fastest
+   *            first, only those that can kill the boss }
    */
   function* searchWeapons(model, candidates, options) {
-    const { stats, boss, tempo, talismans } = options;
+    const { stats, boss, tempo, talismans, blessing } = options;
     const fights = options.fights || createFights(tempo);
     // The first fights of the full set: every fight's cycles come from its own stream, so these
     // are the very fights the shortlist meets again
     const screen = { ...fights, count: Math.min(fights.count, Math.max(1, Math.floor(options.screen ?? 24))) };
     const shortlistSize = Math.max(1, Math.floor(options.shortlist ?? 30));
     const top = Math.max(1, Math.floor(options.top ?? 10));
-    const fight = (c, set, greases) =>
+    const handCount = Math.max(0, Math.floor(options.hands ?? 5));
+    const partnerHands = Math.max(1, Math.floor(options.partnerHands ?? 3));
+    const partnerCount = Math.max(1, Math.floor(options.partners ?? 1));
+    const effects = talismanEffects(talismans);
+    const stamina = staminaFor(boostedStats(stats, effects).end, effects.stamina);
+    const fight = (c, set, greases, partner) =>
       rankInfusionsInSteps(model, c.weapon, {
         stats,
         level: c.level,
@@ -1229,41 +1400,166 @@
         moveset: c.moveset,
         physicalType: c.physicalType,
         talismans,
+        blessing,
         fights: set,
         greases,
+        left: partner ? { weapon: partner.weapon, level: partner.level, moveset: partner.moveset } : undefined,
       });
 
     const usable = [];
     const skipped = [];
     for (const c of candidates) (weaponFamilies(c.weapon, c.moveset, c.physicalType).generic ? skipped : usable).push(c);
 
-    const estimates = [];
+    // What one point of each status's buildup is worth against this boss, at its first threshold
+    const statusWorth = {};
+    for (const type of STATUS_TYPES) {
+      const thresholds = boss.status[type];
+      const effect = STATUS_EFFECTS[type];
+      if (!Array.isArray(thresholds) || !effect) continue;
+      const proc =
+        effect.hpShare !== undefined
+          ? (effect.hpShare * boss.hp + effect.flat) * (boss.statusDamage ?? 1)
+          : (effect.hpSharePerSecond * boss.hp + effect.flatPerSecond) * effect.seconds;
+      statusWorth[type] = proc / thresholds[0];
+    }
+    const hitWorth = (result) => {
+      let v = hitDamage(result, boss, { multiplier: blessingMultiplier(blessing, boss) }).total;
+      for (const type of Object.keys(statusWorth)) if (result.status[type]) v += statusWorth[type] * result.status[type].total;
+      return v;
+    };
+
+    // 1. Every weapon alone; every infusion one-handed is also a hand for stage 2
+    const singles = [];
+    const hands = [];
     for (let i = 0; i < usable.length; i++) {
-      const steps = fight(usable[i], screen, false);
+      const c = usable[i];
+      const steps = fight(c, screen, false);
       let step;
       while (!(step = steps.next()).done);
       const best = fastestRow(step.value.rows);
-      if (Number.isFinite(best.sim.seconds)) estimates.push({ c: usable[i], seconds: best.sim.seconds, ar: best.result.total, i });
+      singles[i] = Number.isFinite(best.sim.seconds) ? { seconds: best.sim.seconds, ar: best.result.total } : null;
+      if (handCount && canPowerstance(c.weapon, c.moveset)) {
+        for (const row of step.value.rows) {
+          const one = row.grips["1h"];
+          if (one) hands.push({ i, c, infusion: row.infusion, result: one.result, seconds: one.sim.seconds, worth: hitWorth(one.result) });
+        }
+      }
       yield { stage: "screen", done: i + 1, total: usable.length };
+    }
+
+    // 2. Pairs, type by type: the most promising hands with each other, which finds the type's
+    //    best left hands, then every right hand with those
+    const byType = new Map();
+    for (const h of hands) {
+      const type = h.c.weapon.typeName;
+      if (!byType.has(type)) byType.set(type, []);
+      byType.get(type).push(h);
+    }
+    const groups = [];
+    for (const all of byType.values()) {
+      const picked = new Set();
+      const byWorth = all.slice().sort((a, b) => b.worth - a.worth);
+      all
+        .filter((h) => Number.isFinite(h.seconds))
+        .sort((a, b) => a.seconds - b.seconds)
+        .slice(0, handCount)
+        .forEach((h) => picked.add(h));
+      byWorth.slice(0, handCount).forEach((h) => picked.add(h));
+      for (const type of Object.keys(statusWorth)) {
+        const h = byWorth.find((x) => x.result.status[type] && x.result.status[type].total > 0);
+        if (h) picked.add(h);
+      }
+      const partners = Math.min(partnerHands, picked.size);
+      groups.push({ all, picked: [...picked], partners, pairs: picked.size * picked.size + (all.length - picked.size) * partners });
+    }
+    const pairTotal = groups.reduce((n, g) => n + g.pairs, 0);
+    const psFamilies = new Map(); // "right left" (candidate indexes) → powerstance families
+    const familiesOf = (right, left) => {
+      const key = `${right.i} ${left.i}`;
+      if (!psFamilies.has(key)) psFamilies.set(key, weaponFamilies(right.c.weapon, right.c.moveset, right.c.physicalType, left.c.moveset).families.ps || null);
+      return psFamilies.get(key);
+    };
+    const pairFight = (right, left, set) =>
+      simulate(prepareFighter({ result: right.result, left: left.result, boss, families: familiesOf(right, left), grip: "ps", stamina, effects, tempo, blessing }), set);
+    const pairsByRight = new Map();
+    let pairsDone = 0;
+    const fightPair = (right, left) => {
+      if (!familiesOf(right, left)) return Infinity;
+      const sim = pairFight(right, left, screen);
+      if (Number.isFinite(sim.seconds)) {
+        if (!pairsByRight.has(right.i)) pairsByRight.set(right.i, []);
+        pairsByRight.get(right.i).push({ right, left, seconds: sim.seconds, ar: right.result.total });
+      }
+      return sim.seconds;
+    };
+    for (const group of groups) {
+      // The promising hands every way round; a left hand counts by the best pair it makes
+      const asLeft = new Map(group.picked.map((h) => [h, Infinity]));
+      for (const right of group.picked) {
+        for (const left of group.picked) {
+          const seconds = fightPair(right, left);
+          if (seconds < asLeft.get(left)) asLeft.set(left, seconds);
+          yield { stage: "pairs", done: ++pairsDone, total: pairTotal };
+        }
+      }
+      const partners = group.picked
+        .filter((h) => Number.isFinite(asLeft.get(h)))
+        .sort((a, b) => asLeft.get(a) - asLeft.get(b))
+        .slice(0, group.partners);
+      // Every other right hand of the type with the best left hands
+      const inPicked = new Set(group.picked);
+      for (const right of group.all) {
+        if (inPicked.has(right)) continue;
+        for (const left of partners) {
+          fightPair(right, left);
+          yield { stage: "pairs", done: ++pairsDone, total: pairTotal };
+        }
+        pairsDone += group.partners - partners.length; // left hands that made no pair at all
+      }
+    }
+
+    // 3. The closest, alone or as a right hand, over every fight
+    const estimates = [];
+    for (let i = 0; i < usable.length; i++) {
+      const pairs = (pairsByRight.get(i) || []).sort((a, b) => a.seconds - b.seconds || b.ar - a.ar);
+      const single = singles[i];
+      const pair = pairs[0];
+      if (!single && !pair) continue;
+      const alone = single && (!pair || single.seconds <= pair.seconds);
+      estimates.push({ c: usable[i], i, seconds: alone ? single.seconds : pair.seconds, ar: alone ? single.ar : pair.ar, pairs });
     }
     estimates.sort((a, b) => a.seconds - b.seconds || b.ar - a.ar || a.i - b.i);
     const shortlist = estimates.slice(0, shortlistSize);
 
     const results = [];
-    for (let i = 0; i < shortlist.length; i++) {
-      const { c } = shortlist[i];
-      const steps = fight(c, fights, true);
-      let step;
-      while (!(step = steps.next()).done) yield { stage: "final", done: i, total: shortlist.length };
-      const full = step.value;
-      results.push({ weapon: c.weapon, level: c.level, fight: full, best: fastestRow(full.rows), i });
-      yield { stage: "final", done: i + 1, total: shortlist.length };
+    for (let k = 0; k < shortlist.length; k++) {
+      const { c, pairs } = shortlist[k];
+      // Alone, or with the partner weapon of each of its two best pairs in the left hand, exactly
+      // as rankInfusions fights the weapon with that left hand (which fights it alone as well)
+      const partners = [];
+      for (const p of pairs) if (partners.length < partnerCount && !partners.includes(p.left.c)) partners.push(p.left.c);
+      if (!partners.length) partners.push(null);
+      let full = null;
+      let best = null;
+      for (const partner of partners) {
+        const steps = fight(c, fights, true, partner);
+        let step;
+        while (!(step = steps.next()).done) yield { stage: "final", done: k, total: shortlist.length };
+        const row = fastestRow(step.value.rows);
+        if (!best || row.sim.seconds < best.sim.seconds || (row.sim.seconds === best.sim.seconds && row.result.total > best.result.total)) {
+          best = row;
+          full = step.value;
+        }
+      }
+      results.push({ weapon: c.weapon, level: c.level, fight: full, best, i: k });
+      yield { stage: "final", done: k + 1, total: shortlist.length };
     }
     results.sort((a, b) => a.best.sim.seconds - b.best.sim.seconds || b.best.result.total - a.best.result.total || a.i - b.i);
     return {
       searched: usable.length,
       skipped: skipped.map((c) => c.weapon),
       screen: screen.count,
+      pairs: pairTotal,
       shortlist: shortlist.length,
       results: results
         .filter((r) => Number.isFinite(r.best.sim.seconds))
@@ -1280,6 +1576,9 @@
     PHYSICAL_TYPES,
     STATUS_EFFECTS,
     DAMAGING_STATUS,
+    BLESSING_ATTACK,
+    MAX_BLESSING,
+    blessingMultiplier,
     evaluateCurve,
     createModel,
     effectiveStats,
@@ -1308,6 +1607,8 @@
     prepareFighter,
     simulate,
     weaponFamilies,
+    pairedAttacks,
+    canPowerstance,
     fastestRow,
     rankInfusions,
     rankInfusionsInSteps,

@@ -56,14 +56,23 @@ test("rankInfusionsInSteps steps between infusions and ends where rankInfusions 
   const yields = [];
   let step;
   while (!(step = generator.next()).done) yields.push(step.value);
-  assert.deepEqual(yields, Array.from({ length: c.weapon.infusions.length - 1 }, (_, k) => k + 1));
+  // Before each infusion after the first, and before the grease fight of the four physical ones
+  const expected = [];
+  c.weapon.infusions.forEach((infusion, k) => {
+    if (k) expected.push(k);
+    if (Engine.BUFFABLE_AFFINITIES.has(infusion.affinity)) expected.push(k);
+  });
+  assert.equal(expected.length, c.weapon.infusions.length - 1 + 4);
+  assert.deepEqual(yields, expected);
   assert.deepEqual(step.value, Engine.rankInfusions(model, c.weapon, options));
 });
 
 test("searchWeapons ranks every weapon with a moveset by its best infusion", () => {
   const fights = Engine.createFights(tempo, { count: 40, seed: 11 });
-  // A shortlist as long as the list fights every weapon over every fight: the exact answer
-  const { steps, found } = search({ fights, screen: 8, shortlist: 99, top: 5 });
+  // A shortlist as long as the list fights every weapon over every fight: the exact answer.
+  // No hands to pair (hands: 0): each weapon alone
+  const { steps, found } = search({ fights, screen: 8, shortlist: 99, top: 5, hands: 0 });
+  assert.equal(found.pairs, 0);
 
   assert.deepEqual(found.skipped.map((w) => w.name), ["Astrologer's Staff", "Longbow", "Unarmed"], "no moveset data, not searched");
   assert.equal(found.searched, 10);
@@ -103,7 +112,7 @@ test("searchWeapons ranks every weapon with a moveset by its best infusion", () 
 
 test("searchWeapons screens over the first fights and keeps only the closest", () => {
   const fights = Engine.createFights(tempo, { count: 40, seed: 11 });
-  const { steps, found } = search({ fights, screen: 8, shortlist: 4, top: 3 });
+  const { steps, found } = search({ fights, screen: 8, shortlist: 4, top: 3, hands: 0 });
   assert.deepEqual(steps.at(-1), { stage: "final", done: 4, total: 4 });
   assert.equal(found.shortlist, 4);
   assert.equal(found.results.length, 3);
@@ -126,4 +135,47 @@ test("searchWeapons screens over the first fights and keeps only the closest", (
   small.extend(3);
   fights.extend(3);
   assert.deepEqual(Array.from(small.opens[3].slice(0, 20)), Array.from(fights.opens[3].slice(0, 20)));
+});
+
+test("searchWeapons pairs weapons of a type to powerstance, and fights a pair as the page does", () => {
+  const fights = Engine.createFights(tempo, { count: 40, seed: 11 });
+  const { steps, found } = search({ fights, screen: 8, shortlist: 99, top: 10 });
+  const base = { stats, boss: margit, tempo, talismans: [], fights };
+
+  // Screen, then pairs, then the final stage, each counting up to its total
+  const stages = steps.map((s) => s.stage);
+  assert.deepEqual([...new Set(stages)], ["screen", "pairs", "final"]);
+  assert.ok(stages.indexOf("final") > stages.lastIndexOf("pairs") && stages.lastIndexOf("screen") < stages.indexOf("pairs"));
+  const pairSteps = steps.filter((s) => s.stage === "pairs");
+  assert.ok(pairSteps.every((s, k) => s.done === k + 1 && s.total === found.pairs));
+  assert.equal(pairSteps.length, found.pairs);
+  // Daggers, katanas and twinblades can pair; a weapon with itself counts too
+  assert.ok(found.pairs > 0);
+
+  const byName = new Map(candidates.map((c) => [c.weapon.name, c]));
+  assert.ok(found.results.some((r) => r.best.grip === "ps"), "some weapon is fastest powerstanced");
+  found.results.forEach((r, i) => {
+    const c = byName.get(r.weapon.name);
+    const options = { ...base, level: c.level, moveset: c.moveset, physicalType: c.physicalType };
+    const alone = Engine.fastestRow(Engine.rankInfusions(model, r.weapon, options).rows);
+    if (r.best.grip === "ps") {
+      const l = r.best.left;
+      assert.equal(l.weapon.typeName, r.weapon.typeName, "the same type in both hands");
+      assert.equal(r.fight.left.weapon, l.weapon);
+      // What the page shows with that weapon in the left hand
+      const left = { weapon: l.weapon, level: byName.get(l.weapon.name).level, moveset: byName.get(l.weapon.name).moveset };
+      const page = Engine.fastestRow(Engine.rankInfusions(model, r.weapon, { ...options, left }).rows);
+      assert.equal(page.sim.seconds, r.best.sim.seconds, `${r.weapon.name} with ${l.weapon.name}`);
+      assert.equal(page.left.infusion, l.infusion);
+      assert.ok(r.best.sim.seconds <= alone.sim.seconds, "powerstanced only when it is faster");
+    } else {
+      assert.equal(r.best.sim.seconds, alone.sim.seconds, `${r.weapon.name} alone`);
+    }
+    assert.equal(r.best, Engine.fastestRow(r.fight.rows));
+    if (i) assert.ok(r.best.sim.seconds >= found.results[i - 1].best.sim.seconds, "fastest first");
+  });
+
+  // Each weapon is at least as fast as without pairs
+  const singles = new Map(search({ fights, screen: 8, shortlist: 99, top: 10, hands: 0 }).found.results.map((r) => [r.weapon.name, r.best.sim.seconds]));
+  for (const r of found.results) assert.ok(r.best.sim.seconds <= singles.get(r.weapon.name));
 });

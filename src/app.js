@@ -37,7 +37,9 @@
   const NEG_TYPES = ["standard", "slash", "strike", "pierce", "magic", "fire", "lightning", "holy"];
   const NEG_LABEL = { ...PHYS_LABEL, magic: "Magic", fire: "Fire", lightning: "Lightning", holy: "Holy" };
   const BOSS_STATUS = ["bleed", "frost", "poison", "rot", "sleep", "madness"];
-  const GRIP_LABEL = { "1h": "One-handed", "2h": "Two-handed" };
+  const GRIP_LABEL = { "1h": "One-handed", "2h": "Two-handed", ps: "Powerstanced" };
+  /** A grip's name: a paired weapon held in both hands swings both of its pair */
+  const gripLabel = (grip, w) => (grip === "2h" && w.paired ? "Paired" : GRIP_LABEL[grip]);
   const TALISMAN_SLOTS = 4;
   const TALISMAN_CATEGORIES = [
     ["attributes", "Attributes"],
@@ -64,7 +66,9 @@
     sort: "ar", // "ar": best first (by AR, or by kill time when a boss is picked); "game": in-game order
     sample: true, // true while the attributes are still the example ones
     boss: "", // boss id, or "" to rank by attack rating
+    blessing: 0, // Scadutree Blessing level: counts only against Shadow of the Erdtree bosses
     talismans: ["", "", "", ""], // talisman names, "" for an empty slot
+    left: "", // the left hand's weapon (same type, to powerstance), or "" for none
   };
 
   const $ = (id) => document.getElementById(id);
@@ -72,6 +76,9 @@
     combo: $("weapon-input").parentElement,
     input: $("weapon-input"),
     weaponIcon: $("weapon-icon"),
+    left: $("left-weapon"),
+    leftIcon: $("left-icon"),
+    leftHint: $("left-hint"),
     toggle: $("weapon-toggle"),
     list: $("weapon-list"),
     meta: $("weapon-meta"),
@@ -97,6 +104,10 @@
     boss: $("boss"),
     bossHint: $("boss-hint"),
     bossCard: $("boss-card"),
+    blessingField: $("blessing-field"),
+    blessing: $("blessing"),
+    blessingOut: $("blessing-out"),
+    blessingHint: $("blessing-hint"),
     finder: $("finder"),
     finderTitle: $("finder-title"),
     finderHint: $("finder-hint"),
@@ -150,6 +161,7 @@
   const percent = (v) => `${Math.round(v * 100)}%`;
   const percentMore = (a, b) => (a / b - 1) * 100;
   const fmtCount = (n) => (n >= 10 || Number.isInteger(n) ? String(Math.round(n)) : n.toFixed(1));
+  const procsText = (n) => `${fmtCount(n)} ${fmtCount(n) === "1" ? "proc" : "procs"}`;
   const listText = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
   const lower = (s) => s.charAt(0).toLowerCase() + s.slice(1);
   const canKill = (sim) => Number.isFinite(sim.seconds);
@@ -185,6 +197,13 @@
   const movesetOf = (w) => attackDb.movesets[attackDb.weapons[w.name]] || null;
   const alwaysTwoHanded = (w) => !w.paired && E.getsTwoHandBonus(w, false);
   const canChooseGrip = (w) => !w.paired && !alwaysTwoHanded(w);
+  const powerstanceByWeapon = new Map();
+  const canPowerstance = (w) => {
+    if (!powerstanceByWeapon.has(w)) powerstanceByWeapon.set(w, E.canPowerstance(w, movesetOf(w)));
+    return powerstanceByWeapon.get(w);
+  };
+  /** What can go in the left hand to powerstance with w: a weapon of its type that can powerstance, w itself included */
+  const leftChoices = (w) => (canPowerstance(w) ? model.weapons.filter((l) => l.typeName === w.typeName && canPowerstance(l)) : []);
 
   /** How much room a boss leaves to attack: its tempo class with the shared spread. */
   function tempoOf(boss) {
@@ -221,6 +240,8 @@
         s.sort = saved.sort === "game" ? "game" : "ar";
         s.sample = saved.sample !== false;
         if (typeof saved.boss === "string" && bossById.has(saved.boss)) s.boss = saved.boss;
+        if (Number.isFinite(Number(saved.blessing))) s.blessing = Math.max(0, Math.min(E.MAX_BLESSING, Math.floor(saved.blessing)));
+        if (typeof saved.left === "string" && model.byName.has(saved.left)) s.left = saved.left;
         if (Array.isArray(saved.talismans)) {
           // Keep what can be worn together: known names, one of each, one version per talisman
           const kept = [];
@@ -248,6 +269,8 @@
 
   const state = loadState();
   let weapon = model.byName.get(state.weapon) || model.byName.get(DEFAULT_STATE.weapon);
+  let left = leftChoices(weapon).includes(model.byName.get(state.left)) ? model.byName.get(state.left) : null;
+  if (!left) state.left = "";
   const expanded = new Set();
 
   const levelFor = (w) => E.convertLevel(state.level25, 25, w.maxLevel);
@@ -360,12 +383,20 @@
     }
   }
 
-  function choose(w, { keepFocus = false } = {}) {
+  /**
+   * Load a weapon into the right hand. The left hand keeps its weapon while it can still
+   * powerstance with the new one; `withLeft` (a weapon, or null for none) sets it instead.
+   */
+  function choose(w, { keepFocus = false, withLeft } = {}) {
     if (!w) return;
-    if (w !== weapon) {
+    const nextLeft = withLeft !== undefined ? withLeft : left;
+    const keptLeft = nextLeft && leftChoices(w).includes(nextLeft) ? nextLeft : null;
+    if (w !== weapon || keptLeft !== left) {
+      if (w !== weapon) expanded.clear();
       weapon = w;
+      left = keptLeft;
       state.weapon = w.name;
-      expanded.clear();
+      state.left = left ? left.name : "";
       saveState();
     }
     els.input.value = w.name;
@@ -472,6 +503,16 @@
     });
   });
 
+  // ---- left hand ----------------------------------------------------------------------------
+
+  els.left.addEventListener("change", () => {
+    const l = model.byName.get(els.left.value) || null;
+    left = l && leftChoices(weapon).includes(l) ? l : null;
+    state.left = left ? left.name : "";
+    saveState();
+    render();
+  });
+
   // ---- talismans and boss ------------------------------------------------------------------
 
   els.talismans.forEach((select, slot) => {
@@ -500,6 +541,14 @@
     state.boss = els.boss.value;
     saveState();
     render();
+  });
+
+  els.blessing.max = String(E.MAX_BLESSING);
+  els.blessing.addEventListener("input", () => {
+    state.blessing = Number(els.blessing.value);
+    els.blessingOut.textContent = String(state.blessing);
+    saveState();
+    renderSoon();
   });
 
   function setSort(sort) {
@@ -532,10 +581,11 @@
   }
 
   /**
-   * Work everything out from the four inputs and draw it. Each entry of `results` is one
-   * infusion: `one` and `two` are its attack rating one- and two-handed (two is null when the
-   * weapon has no choice of grip), and with a boss `row` is its fight (see E.rankInfusions),
-   * `sim` the fight in the faster grip and `r` the attack rating in that grip.
+   * Work everything out from the inputs and draw it. Each entry of `results` is one infusion:
+   * `one` and `two` are its attack rating one- and two-handed (two is null when the weapon has
+   * no choice of grip), and with a boss `row` is its fight (see E.rankInfusions), `sim` the
+   * fight in the fastest grip, `r` the attack rating in that grip and, when that is
+   * powerstanced, `left` the left hand ({ weapon, infusion, result }).
    */
   function render() {
     clearTimeout(renderTimer);
@@ -556,7 +606,9 @@
           moveset: movesetOf(weapon),
           physicalType: typeOf(weapon),
           talismans,
+          blessing: state.blessing,
           fights: fightsFor(boss),
+          left: left ? { weapon: left, level: levelFor(left), moveset: movesetOf(left) } : undefined,
         })
       : null;
 
@@ -564,7 +616,7 @@
       const one = calc(inf, false);
       const two = canChooseGrip(weapon) ? calc(inf, true) : null;
       const row = fight ? fight.rows[i] : null;
-      return { inf, one, two, row, sim: row ? row.sim : null, r: row ? row.result : one };
+      return { inf, one, two, row, sim: row ? row.sim : null, r: row ? row.result : one, left: row ? row.left : null };
     });
     const gameOrder = (a, b) => results.indexOf(a) - results.indexOf(b);
     const ranked = results
@@ -576,6 +628,7 @@
       );
 
     renderBuild(build, results[0].one);
+    renderLeft(build, boss, fight, ranked[0]);
     renderTalismans(talismans);
     renderBoss(boss);
     if (boss) renderFightVerdict(boss, results, ranked, build, fight);
@@ -635,6 +688,59 @@
     els.sampleNote.hidden = !state.sample;
   }
 
+  /** Requirements of `w` that `stats` don't meet, written out: "DEX 12 (needs 15)" */
+  function unmetText(w, stats) {
+    const r = E.calculate(model, w, w.infusions[0], { stats, level: levelFor(w), twoHanded: false });
+    return r.unmet.map((a) => `${ATTR_SHORT[a]} ${r.stats[a]} (needs ${w.requirements[a]})`);
+  }
+
+  let leftOptionsFor = null; // the right-hand weapon the left hand's list was built for
+  function renderLeft(build, boss, fight, best) {
+    const choices = leftChoices(weapon);
+    if (leftOptionsFor !== weapon) {
+      leftOptionsFor = weapon;
+      els.left.innerHTML = "";
+      els.left.append(new Option("Empty", ""));
+      // Two of the same weapon first, then the rest of its type by name
+      if (choices.includes(weapon)) els.left.append(new Option(`${weapon.name} (a second one)`, weapon.name));
+      const others = choices.filter((l) => l !== weapon).sort((a, b) => a.name.localeCompare(b.name));
+      for (const l of others) els.left.append(new Option(l.name, l.name));
+    }
+    els.left.disabled = !choices.length;
+    els.left.value = left ? left.name : "";
+    showIcon(els.leftIcon, "weapons", left ? left.name : "");
+
+    const html = [];
+    if (!choices.length) {
+      html.push(
+        movesetOf(weapon)
+          ? `${esc(weapon.name)} has no powerstance attacks in the moveset data, so it fights alone.`
+          : `No moveset data for ${esc(weapon.name)}, so it can't be powerstanced.`,
+      );
+    } else if (!left) {
+      html.push(
+        `Hold a second ${esc(weapon.typeName.toLowerCase())} to powerstance: L1 attacks swing both weapons, each hit with its own hand's damage and buildup. Its infusion is worked out for you.`,
+      );
+    } else if (!boss) {
+      html.push("Pick a boss to see whether powerstancing beats one or two hands, and which infusion the left hand wants.");
+    } else {
+      const ps = best.row.grips.ps;
+      if (ps) {
+        html.push(
+          `Best in the left hand, beside ${esc(best.inf.name)}: <strong>${esc(ps.left.infusion.name)}${plusLevel(levelFor(left))}</strong>, ${floor(ps.left.result.total)} AR.`,
+        );
+      }
+    }
+    if (left) {
+      const unmet = unmetText(left, build.stats);
+      if (unmet.length) {
+        html.push(`<span class="hint-warn">Below ${esc(left.name)}'s requirement: ${listText(unmet)}. Its damage that scales with that takes a 40% penalty.</span>`);
+      }
+    }
+    els.leftHint.innerHTML = html.join(" ");
+    els.leftHint.hidden = !html.length;
+  }
+
   function renderTalismans(talismans) {
     els.talismans.forEach((select, slot) => {
       const others = state.talismans.filter((name, i) => i !== slot && name).map((name) => talismanByName.get(name));
@@ -654,6 +760,15 @@
     els.bossHint.hidden = !!boss;
     els.bossCard.hidden = !boss;
     els.bossCard.innerHTML = boss ? bossCardHTML(boss) : "";
+
+    // The Blessing only counts in the Land of Shadow
+    els.blessingField.hidden = !(boss && boss.dlc);
+    els.blessing.value = String(state.blessing);
+    els.blessingOut.textContent = String(state.blessing);
+    const top = `×${E.BLESSING_ATTACK[E.MAX_BLESSING]} at level ${E.MAX_BLESSING}`;
+    els.blessingHint.textContent = state.blessing
+      ? `Your attack ×${E.BLESSING_ATTACK[state.blessing]} in the Land of Shadow${state.blessing < E.MAX_BLESSING ? ` (${top})` : ""}. Status buildup and proc damage stay the same.`
+      : `Set your level: in the Land of Shadow it multiplies your attack, up to ${top}. Status buildup and proc damage stay the same.`;
   }
 
   function bossCardHTML(boss) {
@@ -729,10 +844,10 @@
       .join("");
   }
 
-  function spellTypes() {
+  function spellTypes(w = weapon) {
     const types = [];
-    if (weapon.sorcery) types.push("magic");
-    if (weapon.incantation) types.push("holy");
+    if (w.sorcery) types.push("magic");
+    if (w.incantation) types.push("holy");
     return types;
   }
 
@@ -825,15 +940,41 @@
       .join(", ");
   }
 
+  /** The fastest form among the grips `wanted` picks, over every infusion: { x, grip, g: { result, sim, left } } */
+  function fastestIn(results, wanted) {
+    let best = null;
+    for (const x of results) {
+      for (const [grip, g] of Object.entries(x.row.grips)) {
+        if (!wanted(grip)) continue;
+        const a = killSeconds(g.sim);
+        const b = best ? killSeconds(best.g.sim) : Infinity;
+        if (!best || a < b || (a === b && g.result.total > best.g.result.total)) best = { x, grip, g };
+      }
+    }
+    return best;
+  }
+
+  /** "Cold, one-handed", or "One-handed" for a weapon that can't be infused */
+  const formName = ({ x, grip }) => (weapon.infusable ? `${affinityName(x.inf)}, ${lower(gripLabel(grip, weapon))}` : gripLabel(grip, weapon));
+
   function renderFightVerdict(boss, results, ranked, build, fight) {
     const best = ranked[0];
     const { r, sim, row } = best;
     const count = fight.fights.count;
     const html = [];
-    html.push(`<div class="verdict-label">${weapon.infusable ? "Best infusion against" : "Against"} ${esc(boss.name)}</div>`);
     html.push(
-      `<div class="verdict-main"><p class="verdict-name">${iconHTML("weapons", weapon.name, "verdict-icon")}` +
-        `<span class="verdict-title">${esc(best.inf.name)}<span class="lvl">${plusLevel(build.level)}</span></span></p>` +
+      `<div class="verdict-label">${weapon.infusable ? "Best infusion against" : "Against"} ${esc(boss.name)}` +
+        `${boss.dlc ? `, Scadutree Blessing ${state.blessing}` : ""}</div>`,
+    );
+    const name =
+      `<p class="verdict-name">${iconHTML("weapons", weapon.name, "verdict-icon")}` +
+      `<span class="verdict-title">${esc(best.inf.name)}<span class="lvl">${plusLevel(build.level)}</span></span></p>`;
+    const leftName = best.left
+      ? `<p class="verdict-left">${iconHTML("weapons", best.left.weapon.name, "verdict-left-icon")}<span>with <strong>${esc(best.left.infusion.name)}</strong>` +
+        `<span class="lvl">${plusLevel(levelFor(best.left.weapon))}</span> in the left hand</span></p>`
+      : "";
+    html.push(
+      `<div class="verdict-main">${leftName ? `<div class="verdict-names">${name}${leftName}</div>` : name}` +
         `<div class="verdict-ar"><span class="num">${fmtDps(sim.dps)}</span><span class="unit">DPS</span></div></div>`,
     );
     const parts = damageParts(sim);
@@ -842,7 +983,7 @@
     const keys = parts.parts.map((p) => {
       const status = E.DAMAGING_STATUS.includes(p.key);
       const label = status ? STATUS_LABEL[p.key] : `${DMG_LABEL[p.key]} hits`;
-      const procs = status && sim.procs[p.key] ? `, ${fmtCount(sim.procs[p.key])} procs a fight` : "";
+      const procs = status && sim.procs[p.key] ? `, ${procsText(sim.procs[p.key])} a fight` : "";
       return `<span class="key"><span class="swatch c-${p.key}${p.key === "holy" ? " holy" : ""}"></span>${label} ${percent(p.amount / parts.total)}${procs}</span>`;
     });
     if (keys.length) html.push(`<p class="verdict-split">${keys.join("")}</p>`);
@@ -855,7 +996,7 @@
       if (fight.generic) {
         how.push(`No moveset data for ${esc(weapon.name)}: counted as one ${PHYS_LABEL[typeOf(weapon)].toLowerCase()} hit at motion value 100 per second`);
       } else {
-        how.push(`<strong>${GRIP_LABEL[row.grip]}</strong>${fight.grips.length > 1 ? "" : weapon.paired ? " (paired)" : ""}`);
+        how.push(`<strong>${gripLabel(row.grip, weapon)}</strong>`);
         if (sim.plan.length) how.push(`an opening usually gets ${planText(sim)}`);
         if (sim.idle >= 0.005) how.push(`${percent(sim.idle)} of openings are too short to attack`);
       }
@@ -876,6 +1017,22 @@
         notes.push(`first to kill in <strong>${percent(row.fastest)}</strong> of ${count} simulated fights${rivals.length ? ` (${rivals.join(", ")})` : ""}`);
         const topAr = results.reduce((a, b) => (b.r.total > a.r.total ? b : a));
         if (topAr !== best) notes.push(`highest AR: ${esc(affinityName(topAr.inf))} (${floor(topAr.r.total)} AR, ${fmtDps(topAr.sim.dps)} DPS)`);
+      }
+      if (fight.left) {
+        // Powerstancing against holding the right-hand weapon alone, each at its best
+        const alone = fastestIn(results, (grip) => grip !== "ps");
+        const paired = fastestIn(results, (grip) => grip === "ps");
+        if (row.grip === "ps" && alone && alone.g.sim.dps > 0) {
+          const more = percentMore(sim.dps, alone.g.sim.dps);
+          const what = `${esc(formName(alone))} (${fmtDps(alone.g.sim.dps)})`;
+          notes.push(more < 1 ? `level with ${what} without the left hand` : `<strong>+${Math.round(more)}%</strong> over the best without the left hand: ${what}`);
+        } else if (row.grip !== "ps" && paired) {
+          const less = sim.dps > 0 ? (1 - paired.g.sim.dps / sim.dps) * 100 : 0;
+          notes.push(
+            `powerstanced with ${esc(paired.g.left.infusion.name)}, ${esc(weapon.infusable ? affinityName(paired.x.inf) : weapon.name)} reaches ${fmtDps(paired.g.sim.dps)} DPS` +
+              (less >= 1 ? `, <strong>${Math.round(less)}%</strong> less` : ""),
+          );
+        }
       }
       html.push(`<p class="verdict-notes">${notes.join(" · ")}</p>`);
 
@@ -909,7 +1066,7 @@
     const all = weapon.infusions;
     const dmgCols = boss ? [] : DMG.filter((t) => rows.some((x) => x.one.damage[t]));
     const twoHandCol = !boss && rows.some((x) => x.two && floor(x.two.total) !== floor(x.one.total));
-    const statusCol = rows.some((x) => Object.keys(x.r.status).length);
+    const statusCol = rows.some((x) => statusTypes(x).length);
     const scaleCols = ATTRS.filter((a) => rows.some((x) => x.r.scaling[a] > 0));
     const spellCols = spellTypes();
     const maxTotal = Math.max(1, ...rows.map((x) => x.one.total));
@@ -963,7 +1120,7 @@
         const delta = weapon.infusable && behind > 0 ? `<span class="ar-delta">−${behind < 1 ? "&lt;1" : Math.round(behind)}%</span>` : "";
         const lines = [];
         if (canKill(sim)) {
-          lines.push(`${fight.generic ? "" : `${GRIP_LABEL[x.row.grip]} · `}<span title="Average time to kill, and the range 8 of 10 fights fall in">${rangeClock(sim)}</span>`);
+          lines.push(`${fight.generic ? "" : `${gripText(x)} · `}<span title="Average time to kill, and the range 8 of 10 fights fall in">${rangeClock(sim)}</span>`);
           if (weapon.infusable && x.row.fastest >= 0.005) lines.push(`First to kill in ${percent(x.row.fastest)} of fights`);
         } else lines.push("Can't kill");
         const grease = x.row.grease;
@@ -998,7 +1155,8 @@
         body.push(`<td><span class="${s.ineffective ? "ineffective" : ""}">${floor(s.value)}</span></td>`);
       });
       if (statusCol) {
-        const chips = STATUS.filter((t) => r.status[t]).map((t) => statusChip(t, r, sim, boss));
+        const lr = x.left ? x.left.result : null;
+        const chips = statusTypes(x).map((t) => statusChip(t, r, sim, boss, lr));
         body.push(`<td>${chips.length ? `<span class="chips">${chips.join("")}</span>` : '<span class="none">–</span>'}</td>`);
       }
       scaleCols.forEach((a, i) => {
@@ -1020,25 +1178,38 @@
     els.sortAr.parentElement.hidden = all.length < 2;
   }
 
-  function statusChip(t, r, sim, boss) {
-    const s = r.status[t];
-    const ineffective = s.ineffective ? " ineffective" : "";
+  /** The status effects an infusion's hits build up: the right hand's, and in powerstance the left's too */
+  const statusTypes = (x) => STATUS.filter((t) => x.r.status[t] || (x.left && x.left.result.status[t]));
+
+  /** "One-handed", or "Powerstanced, left: Cold" */
+  function gripText(x) {
+    if (!x.left) return gripLabel(x.row.grip, weapon);
+    return x.left.weapon.infusable ? `${GRIP_LABEL.ps}, left: ${affinityName(x.left.infusion)}` : GRIP_LABEL.ps;
+  }
+
+  /** Buildup a hit: "105", or in powerstance "105 right, 38 left" */
+  function buildupText(t, r, lr) {
+    const of = (res) => floor((res && res.status[t] && res.status[t].total) || 0);
+    return lr ? `${of(r)} right, ${of(lr)} left` : String(of(r));
+  }
+
+  function statusChip(t, r, sim, boss, lr = null) {
+    const ineffective = [r, lr].some((res) => res && res.status[t] && res.status[t].ineffective) ? " ineffective" : "";
     const name = STATUS_LABEL[t];
-    if (!boss) return `<span class="chip c-${t}${ineffective}" title="${name} buildup">${name} ${floor(s.total)}</span>`;
+    if (!boss) return `<span class="chip c-${t}${ineffective}" title="${name} buildup">${name} ${buildupText(t, r, lr)}</span>`;
     if (!boss.status[t]) {
       return `<span class="chip c-${t} immune" title="${esc(boss.name)} is immune to ${name.toLowerCase()}">${name} immune</span>`;
     }
     const n = sim.procs[t] || 0;
     const dealt = sim.sources[t] > 0 ? `, ${percent(sim.sources[t] / boss.hp)} of the damage` : "";
-    const title = `${name}: ${floor(s.total)} buildup a hit, ${fmtCount(n)} procs in an average fight${dealt}`;
+    const title = `${name}: ${buildupText(t, r, lr)} buildup a hit, ${procsText(n)} in an average fight${dealt}`;
     return `<span class="chip c-${t}${n ? "" : " zero"}${ineffective}" title="${esc(title)}">${name} ×${fmtCount(n)}</span>`;
   }
 
-  function breakdownHTML(x, build, boss, fight) {
-    const { level } = build;
-    const { inf, r } = x;
-    const attrs = ATTRS.filter((a) => r.scaling[a] > 0 || weapon.requirements[a]);
-    const head = ["<tr><th scope=\"col\"></th><th scope=\"col\">Base</th>"];
+  /** A weapon's attack rating in one form, damage type by damage type and attribute by attribute */
+  function arTableHTML(r, w, level) {
+    const attrs = ATTRS.filter((a) => r.scaling[a] > 0 || w.requirements[a]);
+    const head = ['<tr><th scope="col"></th><th scope="col">Base</th>'];
     attrs.forEach((a) => {
       const grade = E.scalingGrade(model, r.scaling[a]);
       head.push(
@@ -1070,31 +1241,65 @@
       const s = r.status[t];
       if (s) rows.push(rowHTML(`${STATUS_LABEL[t]} buildup`, s.base, s.parts, s.ineffective, s.total, s.base));
     }
-    for (const t of spellTypes()) {
+    for (const t of spellTypes(w)) {
       const s = r.spell[t];
       rows.push(rowHTML(SPELL_LABEL[t], 100, s.parts, s.ineffective, s.value, 100));
     }
 
     const notes = [];
-    const reqs = ATTRS.filter((a) => weapon.requirements[a]).map((a) => `${ATTR_SHORT[a]} ${weapon.requirements[a]}`);
+    const reqs = ATTRS.filter((a) => w.requirements[a]).map((a) => `${ATTR_SHORT[a]} ${w.requirements[a]}`);
     notes.push(reqs.length ? `Requires ${reqs.join(", ")}.` : "No attribute requirements.");
+    const scaling = attrs.filter((a) => r.scaling[a] > 0).map((a) => `${ATTR_SHORT[a]} ${(r.scaling[a] * 100).toFixed(1)}`);
+    return {
+      html: `<div class="breakdown-wrap"><table class="breakdown"><thead>${head.join("")}</thead><tbody>${rows.join("")}</tbody></table></div>`,
+      requires: notes[0],
+      scaling: scaling.length ? `Scaling values at${plusLevel(level) || " +0"}: ${scaling.join(", ")}.` : "",
+    };
+  }
+
+  function breakdownHTML(x, build, boss, fight) {
+    const { level } = build;
+    const { inf, r } = x;
+    const table = arTableHTML(r, weapon, level);
+
+    const notes = [table.requires];
     if (r.twoHandBonus) notes.push(`STR counts as ${r.stats.str} two-handed.`);
     else if (x.two && floor(x.two.total) !== floor(r.total)) notes.push(`Two-handed it reaches ${floor(x.two.total)} AR.`);
     const added = ATTRS.filter((a) => build.effects.stats[a]).map((a) => `${ATTR_SHORT[a]} +${build.effects.stats[a]}`);
     if (added.length) notes.push(`Talismans add ${added.join(", ")}.`);
-    const scaling = attrs
-      .filter((a) => r.scaling[a] > 0)
-      .map((a) => `${ATTR_SHORT[a]} ${(r.scaling[a] * 100).toFixed(1)}`);
-    if (scaling.length) notes.push(`Scaling values at${plusLevel(level) || " +0"}: ${scaling.join(", ")}.`);
-    if (Object.values(r.status).some((s) => !s.parts.arc && !s.ineffective)) {
+    if (table.scaling) notes.push(table.scaling);
+    const statusResults = x.left ? [r, x.left.result] : [r];
+    if (statusResults.some((res) => Object.values(res.status).some((s) => !s.parts.arc && !s.ineffective))) {
       notes.push("Frost, scarlet rot and death blight never scale. Bleed, poison, sleep and madness scale with Arcane only when the weapon has Arcane scaling.");
     }
 
-    const grip = boss && !fight.generic ? `, ${GRIP_LABEL[x.row.grip].toLowerCase()}` : "";
+    // In powerstance, the left hand's weapon as well
+    let leftHTML = "";
+    if (x.left) {
+      const lw = x.left.weapon;
+      const lr = x.left.result;
+      const leftTable = arTableHTML(lr, lw, levelFor(lw));
+      const leftNotes = [leftTable.requires];
+      if (lr.unmet.length) {
+        const parts = lr.unmet.map((a) => `${ATTR_SHORT[a]} ${lr.stats[a]} (needs ${lw.requirements[a]})`);
+        leftNotes.push(`Below its requirement: ${parts.join(", ")}. Its damage that scales with that takes a 40% penalty.`);
+      }
+      if (leftTable.scaling) leftNotes.push(leftTable.scaling);
+      leftHTML =
+        `<p class="details-sub">Left hand: ${esc(x.left.infusion.name)}${plusLevel(levelFor(lw))}, ${floor(lr.total)} AR</p>` +
+        `${leftTable.html}<p class="details-notes">${leftNotes.join(" ")}</p>`;
+    }
+
+    let grip = "";
+    if (boss && !fight.generic) {
+      grip = x.left
+        ? `, powerstanced with ${esc(x.left.infusion.name)}${plusLevel(levelFor(x.left.weapon))}`
+        : `, ${lower(gripLabel(x.row.grip, weapon))}`;
+    }
     return (
       `<div class="details-inner"><p class="details-title">${esc(inf.name)}${plusLevel(level)}${grip}</p>` +
-      `<div class="breakdown-wrap"><table class="breakdown"><thead>${head.join("")}</thead><tbody>${rows.join("")}</tbody></table></div>` +
-      `<p class="details-notes">${notes.join(" ")}</p>${boss ? fightHTML(x, boss, fight) : ""}${movesetHTML(x, boss, fight)}</div>`
+      `${table.html}<p class="details-notes">${notes.join(" ")}</p>${leftHTML}` +
+      `${boss ? fightHTML(x, boss, fight) : ""}${movesetHTML(x, boss, fight)}</div>`
     );
   }
 
@@ -1104,21 +1309,25 @@
     const dash = '<span class="none">–</span>';
     const html = [];
 
-    // One- against two-handed
+    // One- against two-handed, and powerstanced
     const grips = Object.entries(row.grips);
     if (grips.length > 1) {
       const gripRows = grips.map(([grip, g]) => {
         const chosen = grip === row.grip;
+        const label = g.left
+          ? `<span title="${esc(`With ${g.left.infusion.name}${plusLevel(levelFor(g.left.weapon))} in the left hand`)}">${GRIP_LABEL.ps}</span>`
+          : gripLabel(grip, weapon);
+        const ar = g.left ? `${floor(g.result.total)} + ${floor(g.left.result.total)}` : floor(g.result.total);
         return (
-          `<tr${chosen ? ' class="chosen"' : ""}><th scope="row">${GRIP_LABEL[grip]}${chosen ? '<span class="tag tag-best">Faster</span>' : ""}</th>` +
+          `<tr${chosen ? ' class="chosen"' : ""}><th scope="row">${label}${chosen ? `<span class="tag tag-best">${grips.length > 2 ? "Fastest" : "Faster"}</span>` : ""}</th>` +
           `<td class="total">${fmtDps(g.sim.dps)}</td><td>${canKill(g.sim) ? rangeClock(g.sim) : "Can't kill"}</td>` +
-          `<td>${floor(g.result.total)}</td><td>${percent(g.sim.idle)}</td></tr>`
+          `<td>${ar}</td><td>${percent(g.sim.idle)}</td></tr>`
         );
       });
       html.push(`<p class="details-sub">Against ${esc(boss.name)}, in each grip</p>`);
       html.push(
         `<div class="breakdown-wrap"><table class="breakdown attacks"><thead><tr><th scope="col">Grip</th><th scope="col">DPS</th>` +
-          `<th scope="col" title="Average time to kill, and the range 8 of 10 fights fall in">Kill time</th><th scope="col">AR</th>` +
+          `<th scope="col" title="Average time to kill, and the range 8 of 10 fights fall in">Kill time</th><th scope="col" title="Attack rating in that grip; powerstanced, right hand + left hand">AR</th>` +
           `<th scope="col" title="Openings too short for any attack in this grip">Openings missed</th></tr></thead><tbody>${gripRows.join("")}</tbody></table></div>`,
       );
     }
@@ -1135,7 +1344,7 @@
       const rest = 1 - shown - sim.idle;
       if (rest >= 0.01) pickRows.push(`<tr><th scope="row">Other strings</th><td>${percent(rest)}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td></tr>`);
       if (sim.idle >= 0.005) pickRows.push(`<tr><th scope="row">Too short to attack</th><td>${percent(sim.idle)}</td><td>${dash}</td><td>${dash}</td><td>${dash}</td></tr>`);
-      html.push(`<p class="details-sub">What it does with an opening${grips.length > 1 ? `, ${GRIP_LABEL[row.grip].toLowerCase()}` : ""}</p>`);
+      html.push(`<p class="details-sub">What it does with an opening${grips.length > 1 ? `, ${lower(gripLabel(row.grip, weapon))}` : ""}</p>`);
       html.push(
         `<div class="breakdown-wrap"><table class="breakdown attacks"><thead><tr><th scope="col">Attacks</th>` +
           `<th scope="col" title="Share of the boss's openings that get this string">Openings</th>` +
@@ -1150,7 +1359,15 @@
     const used = sim.plan.length ? families.find((f) => f.id === sim.plan[0].id) : families[0];
     const step = used.steps[0];
     const multiplier = E.attackMultiplier(fight.effects, row.grip, used, step);
-    const hit = E.hitDamage(r, boss, { motionValue: step.mvs[0], physicalType: step.type, multiplier, typeMultipliers: fight.effects.damage });
+    // In powerstance a hit is its own hand's weapon's
+    const leftHand = !!(x.left && step.hands && step.hands[0] === "L");
+    const blessing = E.blessingMultiplier(state.blessing, boss);
+    const hit = E.hitDamage(leftHand ? x.left.result : r, boss, {
+      motionValue: step.mvs[0],
+      physicalType: step.type,
+      multiplier: multiplier * blessing,
+      typeMultipliers: fight.effects.damage,
+    });
     const hitRows = [];
     for (const t of DMG) {
       const p = hit.perType[t];
@@ -1165,18 +1382,20 @@
       hitRows.push(`<tr><th scope="row">One hit</th><td></td><td></td><td></td><td></td><td class="total">${fmt(hit.total)}</td></tr>`);
     }
     const boosted = Math.abs(multiplier - 1) > 1e-9 || Object.keys(fight.effects.damage).length > 0;
-    const hitName = step.name === "Hit" ? "One hit" : `One hit of ${step.name}`;
-    html.push(`<p class="details-sub">${hitName}, motion value ${Number(step.mvs[0].toFixed(1))}${boosted ? ", with your talismans" : ""}</p>`);
+    const hitName = (step.name === "Hit" ? "One hit" : `One hit of ${step.name}`) + (x.left ? (leftHand ? ", left hand" : ", right hand") : "");
+    const withs = [boosted ? "your talismans" : "", blessing > 1 ? `Scadutree Blessing ${state.blessing} (×${blessing})` : ""].filter(Boolean);
+    html.push(`<p class="details-sub">${hitName}, motion value ${Number(step.mvs[0].toFixed(1))}${withs.length ? `, with ${listText(withs)}` : ""}</p>`);
     html.push(
       `<div class="breakdown-wrap"><table class="breakdown"><thead><tr><th scope="col"></th>` +
-        `<th scope="col" title="Attack rating × motion value × talisman bonuses">Attack</th><th scope="col">Defense</th>` +
+        `<th scope="col" title="Attack rating × motion value × talisman and Blessing bonuses">Attack</th><th scope="col">Defense</th>` +
         `<th scope="col" title="Share of the attack left after defense">After defense</th><th scope="col">Negation</th>` +
         `<th scope="col">Damage</th></tr></thead><tbody>${hitRows.join("")}</tbody></table></div>`,
     );
 
-    const statusRows = STATUS.filter((t) => r.status[t]).map((t) => {
+    const lr = x.left ? x.left.result : null;
+    const statusRows = statusTypes(x).map((t) => {
       const thresholds = boss.status[t];
-      const cells = [`<th scope="row">${STATUS_LABEL[t]}</th><td>${floor(r.status[t].total)}</td>`];
+      const cells = [`<th scope="row">${STATUS_LABEL[t]}</th><td>${buildupText(t, r, lr)}</td>`];
       if (!thresholds) cells.push(`<td>Immune</td><td>${dash}</td><td>${dash}</td>`);
       else {
         const share = E.STATUS_EFFECTS[t] ? percent((sim.sources[t] || 0) / boss.hp) : "not counted";
@@ -1186,7 +1405,7 @@
     });
     if (statusRows.length) {
       html.push(
-        `<div class="breakdown-wrap"><table class="breakdown"><thead><tr><th scope="col"></th><th scope="col">Buildup a hit</th>` +
+        `<div class="breakdown-wrap"><table class="breakdown"><thead><tr><th scope="col"></th><th scope="col"${lr ? ' title="Each hit adds the buildup of the hand that lands it"' : ""}>Buildup a hit</th>` +
           `<th scope="col" title="Buildup for the 1st proc / 2nd / 3rd ...; procs after the last value need the last value">Needed per proc</th>` +
           `<th scope="col" title="Procs in an average fight">Procs a fight</th>` +
           `<th scope="col" title="Share of the boss's HP this status takes in an average fight">Of the damage</th></tr></thead><tbody>${statusRows.join("")}</tbody></table></div>`,
@@ -1216,8 +1435,13 @@
     if (row.grease && row.grease.sim.dps > 0 && sim.dps > 0) {
       const g = row.grease;
       notes.push(
-        `With ${esc(g.name)} (+${g.attack} ${g.type} attack, kept on for the whole fight) it reaches ${fmtDps(g.sim.dps)} DPS, ` +
+        `With ${esc(g.name)} (+${g.attack} ${g.type} attack${x.left ? " on the right-hand weapon" : ""}, kept on for the whole fight) it reaches ${fmtDps(g.sim.dps)} DPS, ` +
           `${Math.round(percentMore(g.sim.dps, sim.dps))}% more. Of the four greases, that one adds the most against this boss.`,
+      );
+    }
+    if (x.left) {
+      notes.push(
+        "Powerstanced, the L1 attacks swing both weapons, and each hit deals the attack rating and adds the buildup of the hand that lands it. The other attacks are the right hand's alone.",
       );
     }
     notes.push(
@@ -1232,31 +1456,56 @@
   function movesetHTML(x, boss, fight) {
     const moveset = movesetOf(weapon);
     if (!moveset) return "";
-    const grips = boss ? [x.row.grip] : weapon.paired ? ["1h"] : alwaysTwoHanded(weapon) ? ["2h"] : ["1h", "2h"];
+    // The attacks of the grip it fights in, or without a boss of every grip
+    const sections = [];
+    const add = (title, attacks, hands = false) => {
+      if (attacks && attacks.length) sections.push({ title, attacks, hands });
+    };
+    const powerstance = (l) =>
+      add(
+        `Powerstance attacks, with ${l === weapon ? "a second one" : esc(l.name)} in the left hand`,
+        E.pairedAttacks(moveset.paired, movesetOf(l).paired),
+        true,
+      );
+    const grips = boss ? [x.row.grip] : alwaysTwoHanded(weapon) ? ["2h"] : ["1h", "2h"];
+    for (const grip of grips) {
+      if (grip === "ps") {
+        add(`${GRIP_LABEL["1h"]} attacks`, moveset["1h"]);
+        powerstance(x.left.weapon);
+        continue;
+      }
+      add(`${gripLabel(grip, weapon)} attacks`, moveset[grip]);
+      if (grip === "2h" && weapon.paired) add("Powerstance attacks, with both of the pair", moveset.paired, true);
+    }
+    if (!boss && left && moveset.paired) powerstance(left);
+
     const html = [];
     let estimated = false;
     let untimed = false;
-    for (const grip of grips) {
-      const attacks = moveset[grip];
-      if (!attacks || !attacks.length) continue;
+    let withHands = false;
+    const dash = '<span class="none">–</span>';
+    for (const { title, attacks, hands } of sections) {
       const planned = new Map();
       for (const family of E.attackFamilies(attacks)) for (const step of family.steps) planned.set(step.name, { family, step });
-      const rows = attacks.map(([name, mvs, type, next, exit, stamina]) => {
+      if (hands) withHands = true;
+      const rows = attacks.map(([name, mvs, type, next, exit, stamina, which]) => {
         const p = planned.get(name);
         const situational = E.SITUATIONAL_ATTACKS.includes(name);
         const mark = p && p.family.estimated ? "*" : "";
         if (mark) estimated = true;
         if (!p && !situational) untimed = true;
-        const seconds = (frames, timed) => (frames == null ? '<span class="none">–</span>' : `${fmtSeconds(timed ?? frames / E.FPS)}${mark}`);
+        const seconds = (frames, timed) => (frames == null ? dash : `${fmtSeconds(timed ?? frames / E.FPS)}${mark}`);
+        const handCell = hands ? `<td class="hands">${which ? which.split("").join(" + ") : dash}</td>` : "";
         return (
-          `<tr><th scope="row">${esc(name)}</th><td class="mvs">${mvText(mvs)}</td><td class="type">${type ? PHYS_LABEL[type].toLowerCase() : '<span class="none">–</span>'}</td>` +
-          `<td>${seconds(next, p && p.step.chain)}</td><td>${seconds(exit, p && p.step.exit)}</td><td>${stamina == null ? '<span class="none">–</span>' : stamina}</td></tr>`
+          `<tr><th scope="row">${esc(name)}</th><td class="mvs">${mvText(mvs)}</td>${handCell}<td class="type">${type ? PHYS_LABEL[type].toLowerCase() : dash}</td>` +
+          `<td>${seconds(next, p && p.step.chain)}</td><td>${seconds(exit, p && p.step.exit)}</td><td>${stamina == null ? dash : stamina}</td></tr>`
         );
       });
-      html.push(`<p class="details-sub">${GRIP_LABEL[grip]} attacks</p>`);
+      html.push(`<p class="details-sub">${title}</p>`);
       html.push(
         `<div class="breakdown-wrap"><table class="breakdown attacks"><thead><tr><th scope="col">Attack</th>` +
           `<th scope="col" class="mvs" title="Motion value of each hit: at 100 a hit deals the attack rating">Motion values</th>` +
+          (hands ? `<th scope="col" class="hands" title="The hand that lands each hit: L left, R right">Hands</th>` : "") +
           `<th scope="col" class="type">Type</th>` +
           `<th scope="col" title="Seconds from the start of the attack until the next one can start">Next attack</th>` +
           `<th scope="col" title="Seconds from the start of the attack until you can dodge">Dodge</th>` +
@@ -1266,7 +1515,8 @@
     if (!html.length) return "";
 
     const notes = [
-      "The fight is planned with the R1 chain, heavies, charged heavies and jump attacks. Running, rolling and backstep attacks and guard counters need a setup first, so they are listed but not used.",
+      `The fight is planned with the R1 chain, heavies, charged heavies and jump attacks${withHands ? ", and in powerstance the L1 chain and jumping L1" : ""}. ` +
+        "Running, rolling and backstep attacks and guard counters need a setup first, so they are listed but not used.",
     ];
     if (estimated) {
       notes.push(
@@ -1274,7 +1524,11 @@
       );
     }
     if (untimed) notes.push("An attack without timing can't be planned, and neither can the rest of its chain.");
-    notes.push("Every hit adds the weapon's full status buildup whatever its motion value.");
+    notes.push(
+      withHands
+        ? "Every hit adds its weapon's full status buildup whatever its motion value: in powerstance, the weapon in the hand that lands it. A left-hand hit's motion value is the left weapon's own for that attack."
+        : "Every hit adds the weapon's full status buildup whatever its motion value.",
+    );
     if (!boss) notes.push("Pick a boss to see which of these the weapon should use.");
     html.push(`<p class="details-notes">${notes.join(" ")}</p>`);
     return html.join("");
@@ -1283,7 +1537,8 @@
   // ---- weapon search ---------------------------------------------------------------------------
   // Fights every weapon against the boss, on request: it takes a few seconds, so it runs only
   // when asked, in short slices that keep the page responsive, and its results stay until the
-  // next search (marked out of date when the attributes, talismans or upgrade level change).
+  // next search (marked out of date when the attributes, talismans, upgrade level or, against a
+  // Shadow of the Erdtree boss, Scadutree Blessing change).
 
   const FINDER_TOP = 10;
   const finder = {
@@ -1293,10 +1548,11 @@
   };
 
   /** What a search's results depend on, besides the boss */
-  const finderInputs = () => ({
+  const finderInputs = (boss) => ({
     attributes: STATS.map((a) => state.stats[a]).join(","),
     talismans: state.talismans.filter(Boolean).sort().join("|"),
     "upgrade level": String(state.level25),
+    ...(boss.dlc ? { "Scadutree Blessing": String(state.blessing) } : {}),
   });
 
   let searchable = null;
@@ -1346,12 +1602,12 @@
     const run = { bossId: boss.id };
     finder.run = run;
     finder.last = null;
-    const inputs = finderInputs();
+    const inputs = finderInputs(boss);
     const fights = fightsFor(boss);
     const search = E.searchWeapons(
       model,
       model.weapons.map((w) => ({ weapon: w, level: levelFor(w), moveset: movesetOf(w), physicalType: typeOf(w) })),
-      { stats: { ...state.stats }, boss, tempo: tempoOf(boss), talismans: chosenTalismans(), fights, top: FINDER_TOP },
+      { stats: { ...state.stats }, boss, tempo: tempoOf(boss), talismans: chosenTalismans(), blessing: state.blessing, fights, top: FINDER_TOP },
     );
     els.finderLive.textContent = `Searching every weapon against ${boss.name}.`;
     showFinderProgress({ stage: "screen", done: 0, total: searchableWeapons().fought.length }, fights.count);
@@ -1379,13 +1635,15 @@
   }
 
   function showFinderProgress({ stage, done, total }, fightCount) {
-    // The two stages take about as long as each other
-    const share = stage === "screen" ? (0.5 * done) / total : 0.5 + (0.5 * done) / total;
+    // Roughly how long each stage takes: 30%, 20% and 50% of the search
+    const share = stage === "screen" ? (0.3 * done) / total : stage === "pairs" ? 0.3 + (0.2 * done) / total : 0.5 + (0.5 * done) / total;
     els.finderBar.style.width = `${(share * 100).toFixed(1)}%`;
     els.finderStatus.textContent =
       stage === "screen"
         ? `Fighting every weapon: ${done} of ${total}`
-        : `Fighting the ${total} closest over all ${fightCount} fights: ${done} of ${total}`;
+        : stage === "pairs"
+          ? `Pairing weapons of a type to powerstance: ${done} of ${total}`
+          : `Fighting the ${total} closest over all ${fightCount} fights: ${done} of ${total}`;
   }
 
   els.finderRun.addEventListener("click", () => {
@@ -1400,7 +1658,7 @@
 
   els.finderList.addEventListener("click", (e) => {
     const row = e.target.closest(".finder-row");
-    if (row) choose(model.byName.get(row.dataset.weapon));
+    if (row) choose(model.byName.get(row.dataset.weapon), { withLeft: model.byName.get(row.dataset.left || "") || null });
   });
 
   function renderFinder(boss) {
@@ -1415,20 +1673,22 @@
     const last = finder.last;
     els.finderTitle.textContent = `Best weapons against ${boss.name}`;
     els.finderHint.textContent =
-      `Fights all ${fought.length} weapons with moveset data in every infusion and grip, at your attributes, ` +
-      `talismans and upgrade level (${levelText()}), and lists the ${FINDER_TOP} that kill ${boss.name} fastest. Takes a few seconds.`;
+      `Fights all ${fought.length} weapons with moveset data in every infusion and grip, and powerstanced with the best partners of their type, ` +
+      `at your attributes, talismans${boss.dlc ? `, Scadutree Blessing (${state.blessing})` : ""} and upgrade level (${levelText()}), ` +
+      `and lists the ${FINDER_TOP} that kill ${boss.name} fastest. Takes a few seconds, longer against a boss with a lot of HP.`;
     els.finderRun.textContent = running ? "Stop" : last ? "Search again" : `Find the ${FINDER_TOP} best weapons`;
     els.finderRun.classList.toggle("secondary", running);
     els.finderProgress.hidden = !running;
 
     els.finderList.hidden = !last;
     els.finderNote.hidden = !last;
-    const now = finderInputs();
+    const now = finderInputs(boss);
     const changed = last ? Object.keys(now).filter((k) => now[k] !== last.inputs[k]) : [];
     els.finder.classList.toggle("stale", changed.length > 0);
     els.finderStale.hidden = !changed.length;
     if (changed.length) {
-      const plural = changed.length > 1 || changed[0] !== "upgrade level";
+      // "attributes" and "talismans" are plural; "upgrade level" and "Scadutree Blessing" aren't
+      const plural = changed.length > 1 || changed[0] === "attributes" || changed[0] === "talismans";
       els.finderStale.textContent = `Your ${listText(changed)} ${plural ? "have" : "has"} changed since this search. Search again to update the list.`;
     }
     if (!last) {
@@ -1440,17 +1700,20 @@
     // keeps keyboard focus on the row you picked
     if (finder.drawn !== last) {
       finder.drawn = last;
-      const { results, skipped, screen, shortlist } = last.found;
+      const { results, skipped, screen, shortlist, pairs } = last.found;
       const topDps = results.length ? results[0].best.sim.dps : 0;
       els.finderList.innerHTML = results.length
         ? results.map((r, i) => finderRowHTML(r, i, topDps)).join("")
         : `<li class="hint">No weapon can bring ${esc(boss.name)} down with this build.</li>`;
+      const paired = results.some((r) => r.best.left);
+      const twins = results.some((r) => r.best.left && r.best.left.weapon === r.weapon);
       els.finderNote.textContent =
-        `Select a weapon to load it. Each weapon was fought over the first ${screen} fights, then the ${shortlist} closest ` +
-        `over all ${fightsFor(boss).count}. Not searched, for want of moveset data: ${skippedText(skipped)}.`;
+        `Select a weapon to load it${paired ? ", and its partner into the left hand" : ""}. Each weapon was fought over the first ${screen} fights, ` +
+        `with ${fmt(pairs)} powerstance pairs over the same fights, then the ${shortlist} closest over all ${fightsFor(boss).count}. ` +
+        `${twins ? "A pair of the same weapon needs two of it. " : ""}Not searched, for want of moveset data: ${skippedText(skipped)}.`;
     }
     for (const row of els.finderList.querySelectorAll(".finder-row")) {
-      row.setAttribute("aria-current", String(row.dataset.weapon === weapon.name));
+      row.setAttribute("aria-current", String(row.dataset.weapon === weapon.name && row.dataset.left === state.left));
     }
   }
 
@@ -1459,7 +1722,8 @@
     const sim = best.sim;
     const how = [esc(w.typeName)];
     if (w.infusable) how.push(esc(affinityName(best.infusion)));
-    how.push(w.paired ? "Paired" : GRIP_LABEL[best.grip]);
+    if (best.left && best.left.weapon.infusable) how.push(`left ${esc(affinityName(best.left.infusion))}`);
+    how.push(gripLabel(best.grip, w));
     how.push(`kills in ${rangeClock(sim)}`);
     const extra = [];
     const greased = fight.rows
@@ -1468,16 +1732,24 @@
     if (greased) {
       extra.push(`<span class="finder-extra">With ${esc(greased.grease.name)}, ${esc(affinityName(greased.infusion))} reaches ${fmtDps(greased.grease.sim.dps)} DPS</span>`);
     }
+    const needs = (wpn, result) => result.unmet.map((a) => `${wpn.requirements[a]} ${ATTR_SHORT[a]}`);
     if (best.result.unmet.length) {
-      const needs = best.result.unmet.map((a) => `${w.requirements[a]} ${ATTR_SHORT[a]}`);
-      extra.push(`<span class="finder-extra unmet">Requirement not met: ${listText(needs)}</span>`);
+      extra.push(`<span class="finder-extra unmet">Requirement not met: ${listText(needs(w, best.result))}</span>`);
+    }
+    // A second one of the same weapon has the same requirements, already noted
+    if (best.left && best.left.weapon !== w && best.left.result.unmet.length) {
+      extra.push(
+        `<span class="finder-extra unmet">${esc(best.left.weapon.name)}'s requirement not met: ${listText(needs(best.left.weapon, best.left.result))}</span>`,
+      );
     }
     const width = topDps > 0 ? Math.max(2, (sim.dps / topDps) * 100) : 0;
     return (
-      `<li><button type="button" class="finder-row" data-weapon="${esc(w.name)}">` +
+      `<li><button type="button" class="finder-row" data-weapon="${esc(w.name)}" data-left="${best.left ? esc(best.left.weapon.name) : ""}">` +
       `<span class="finder-rank">${i + 1}</span>` +
-      iconHTML("weapons", w.name, "finder-icon") +
-      `<span class="finder-text"><span class="finder-name">${esc(w.name)}${w.dlc ? '<span class="badge">DLC</span>' : ""}</span>` +
+      (best.left
+        ? `<span class="finder-icons">${iconHTML("weapons", w.name, "finder-icon")}${iconHTML("weapons", best.left.weapon.name, "finder-icon-left")}</span>`
+        : iconHTML("weapons", w.name, "finder-icon")) +
+      `<span class="finder-text"><span class="finder-name">${esc(w.name)}${best.left ? ` + ${best.left.weapon === w ? "a second one" : esc(best.left.weapon.name)}` : ""}${w.dlc ? '<span class="badge">DLC</span>' : ""}</span>` +
       `<span class="finder-how">${how.map((h) => `<span class="nowrap">${h}</span>`).join(" · ")}</span>${extra.join("")}</span>` +
       `<span class="finder-dps"><span><span class="num">${fmtDps(sim.dps)}</span><span class="unit">DPS</span></span>` +
       `<span class="bar" aria-hidden="true"><span style="--c: var(--accent); width: ${width.toFixed(1)}%"></span></span></span>` +
@@ -1511,11 +1783,11 @@
     const tempo = tempoOf(boss);
     const count = fight.fights.count;
     const text = [
-      `<strong>What DPS means.</strong> ${esc(boss.name)}'s HP divided by the average time to kill it over ${count} simulated fights. A fight is a run of openings: the boss attacks, then leaves you room. In each opening the calculator plays the attacks worth the most in the time you have, within your stamina, and stops in time to dodge. It tries one- and two-handed and keeps the faster. Select an infusion to see what it does.`,
-      `<strong>The fights are random, and the same for every infusion.</strong> Openings and the waits between them vary from one to the next and from fight to fight, so each result is an average with a range: 8 of 10 fights fall inside it. Every infusion meets the same ${count} fights, so a lead of a few percent means little, and “first to kill” says how often an infusion actually won.`,
+      `<strong>What DPS means.</strong> ${esc(boss.name)}'s HP divided by the average time to kill it over ${count} simulated fights. A fight is a run of openings: the boss attacks, then leaves you room. In each opening the calculator plays the attacks worth the most in the time you have, within your stamina, and stops in time to dodge. It tries one- and two-handed${left ? `, and powerstanced with ${esc(left === weapon ? `a second ${weapon.name}` : left.name)} in your left hand,` : ""} and keeps the fastest. Select an infusion to see what it does.`,
+      `<strong>The fights are random, and the same for every infusion.</strong> Openings and the waits between them vary from one to the next and from fight to fight, so each result is an average with a range: 8 of 10 fights fall inside it. Every infusion meets the same ${count} fights, so a lead of a few percent means little, and “first to kill” says how often an infusion actually won (infusions that kill on the same hit share that fight).`,
       `<strong>How long the openings are is an estimate.</strong> No one has published how long bosses leave themselves open, so each boss is placed in one of five classes. ${esc(boss.name)} counts as ${esc(lower(tempo.label))}: openings of about ${fmtSeconds(tempo.opening)}, one every ${fmtSeconds(tempo.opening + tempo.gap)} or so. Kill times move with that guess; the order of the infusions moves much less.`,
-      `<strong>Damage.</strong> Each damage type in a hit is cut by the boss's defense against it and then by its negation, so spreading damage across types or into a type the boss resists costs DPS. Every hit adds the weapon's full status buildup, which procs when it reaches the boss's resistance, rising after every proc: bleed and frost deal a share of max HP at once, poison and scarlet rot tick for 90 seconds, and frostbite makes the boss take 20% more damage for 30 seconds. Sleep and madness procs deal nothing.`,
-      `<strong>Fixed assumptions.</strong> ${E.TIMING.windup} s of wind-up before an uncharged heavy and ${E.TIMING.airtime} s in the air before a jump attack; a string of attacks must leave some stamina to dodge with; New Game numbers. Not counted: buffs, weapon skills, spells, spirit ashes, stance breaks and ripostes, counter-hits, and status buildup draining between hits. The four physical infusions also show their best grease (+${E.GREASES[0].attack} attack of one element), assumed to stay on for the whole fight.`,
+      `<strong>Damage.</strong> Each damage type in a hit is cut by the boss's defense against it and then by its negation, so spreading damage across types or into a type the boss resists costs DPS. Every hit adds its weapon's full status buildup (powerstanced, the weapon in the hand that lands it), which procs when it reaches the boss's resistance, rising after every proc: bleed and frost deal a share of max HP at once, poison and scarlet rot tick for 90 seconds, and frostbite makes the boss take 20% more damage for 30 seconds. Sleep and madness procs deal nothing.`,
+      `<strong>Fixed assumptions.</strong> ${E.TIMING.windup} s of wind-up before an uncharged heavy and ${E.TIMING.airtime} s in the air before a jump attack; a string of attacks must leave some stamina to dodge with; New Game numbers. Not counted: buffs, weapon skills, spells, spirit ashes, stance breaks and ripostes, counter-hits, and status buildup draining between hits. The four physical infusions also show their best grease (+${E.GREASES[0].attack} attack of one element, on the right-hand weapon when powerstanced), assumed to stay on for the whole fight.`,
     ];
     if (fight.generic) {
       text.push(`<strong>No moveset data.</strong> ${esc(weapon.name)} is counted as one hit at motion value 100 per second of opening.${weapon.sorcery || weapon.incantation ? " This ranks hits with the tool itself; spell damage follows the spell scaling instead." : ""}`);
